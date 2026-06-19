@@ -3,7 +3,8 @@ import {
   Sun, Moon, Settings, Signal, Battery, ArrowUp, ArrowDown,
   ArrowLeft, ArrowRight, Square, Mic, Send, CheckCircle2, Cpu,
   Thermometer, Zap, Radio, Ruler, Wifi, WifiOff, Loader2,
-  Activity, X, RotateCcw, Gamepad2, Bot, AlertTriangle, Database, Camera
+  Activity, X, RotateCcw, Gamepad2, Bot, AlertTriangle, Database, Camera,
+  Monitor, Film
 } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { useInterval } from "@/hooks/use-interval";
@@ -12,6 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
+
+import { CameraOverlay } from "@/components/CameraOverlay";
 import {
   firebaseConfigured,
   setDriveDirection,
@@ -53,11 +56,11 @@ const CONTROL_TABS: { id: ControlMode; label: string; icon: React.ElementType }[
 ];
 
 const JOINT_CONFIG = {
-  base:     { label: "Base",     color: "#64748b", accentClass: "text-slate-500",   dotClass: "bg-slate-500"   },
-  shoulder: { label: "Shoulder", color: "#3b82f6", accentClass: "text-blue-500",    dotClass: "bg-blue-500"    },
-  elbow:    { label: "Elbow",    color: "#6366f1", accentClass: "text-indigo-500",  dotClass: "bg-indigo-500"  },
-  wrist:    { label: "Wrist",    color: "#8b5cf6", accentClass: "text-violet-500",  dotClass: "bg-violet-500"  },
-  gripper:  { label: "Gripper",  color: "#10b981", accentClass: "text-emerald-500", dotClass: "bg-emerald-500" },
+  base:     { label: "Base",     color: "hsl(243, 75%, 59%)", accentClass: "text-primary",   dotClass: "bg-primary"   },
+  shoulder: { label: "Shoulder", color: "hsl(243, 75%, 59%)", accentClass: "text-primary",   dotClass: "bg-primary"   },
+  elbow:    { label: "Elbow",    color: "hsl(243, 75%, 59%)", accentClass: "text-primary",   dotClass: "bg-primary"   },
+  wrist:    { label: "Wrist",    color: "hsl(243, 75%, 59%)", accentClass: "text-primary",   dotClass: "bg-primary"   },
+  gripper:  { label: "Gripper",  color: "hsl(243, 75%, 59%)", accentClass: "text-primary",   dotClass: "bg-primary"   },
 } as const;
 
 const JOINT_ORDER = ["base", "shoulder", "elbow", "wrist", "gripper"] as const;
@@ -173,7 +176,17 @@ interface SettingsPanelProps {
   ping: number | null;
   rebooting: boolean;
   handleReboot: () => void;
+  rssi: number | undefined;
 }
+
+const ToggleSwitch = ({ checked, onChange }: { checked: boolean, onChange: (c: boolean) => void }) => (
+  <button 
+    onClick={() => onChange(!checked)}
+    className={`relative inline-flex h-4 w-8 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-inner ${checked ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.6)]' : 'bg-slate-300 dark:bg-slate-700'}`}
+  >
+    <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${checked ? 'translate-x-4' : 'translate-x-0'}`} />
+  </button>
+);
 
 const SettingsPanel = React.memo(function SettingsPanel({
   showSettings,
@@ -193,8 +206,20 @@ const SettingsPanel = React.memo(function SettingsPanel({
   handleDisconnectWs,
   ping,
   rebooting,
-  handleReboot
+  handleReboot,
+  rssi
 }: SettingsPanelProps) {
+  
+  // RSSI Visualizer Logic
+  const getRssiInfo = (val: number) => {
+    if (val >= -50) return { label: "Excellent", activeBars: 4, color: "bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.5)]" };
+    if (val >= -65) return { label: "Good", activeBars: 3, color: "bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.5)]" };
+    if (val >= -80) return { label: "Fair", activeBars: 2, color: "bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.5)]" };
+    return { label: "Weak", activeBars: 1, color: "bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.5)]" };
+  };
+  const rssiValue = rssi ?? -42;
+  const rssiInfo = getRssiInfo(rssiValue);
+
   return (
     <AnimatePresence>
       {showSettings && (
@@ -213,10 +238,10 @@ const SettingsPanel = React.memo(function SettingsPanel({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -10 }}
             transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
-            className="w-full max-w-md bg-white/95 dark:bg-slate-950/80 backdrop-blur-xl border border-black/10 dark:border-white/10 rounded-2xl shadow-2xl relative overflow-hidden z-10 text-slate-900 dark:text-white flex flex-col max-h-[90vh]"
+            className="w-full max-w-[480px] bg-white/95 dark:bg-[#1E1E24] backdrop-blur-md border border-slate-200 dark:border-[#333] rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.1)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)] relative overflow-hidden z-10 flex flex-col max-h-[90vh] font-sans"
           >
             {/* Subtle top glow line */}
-            <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent" />
+            <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[#FF9F43]/50 to-transparent" />
 
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-black/10 dark:border-white/10 shrink-0">
@@ -240,7 +265,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
               {/* Row 1: Firebase Link & Heartbeat */}
               <div className="flex items-center justify-between py-1.5 border-b border-black/[0.05] dark:border-white/[0.06]">
                 <div className="flex items-center gap-2.5">
-                  <Database className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <Database className="w-4 h-4 text-primary dark:text-primary shrink-0" />
                   <div className="flex flex-col">
                     <span className="text-xs font-semibold text-slate-900 dark:text-white/90">Firebase Connection</span>
                     <span className="text-[9px] text-slate-500 dark:text-white/40">Realtime database status & active latency</span>
@@ -251,11 +276,11 @@ const SettingsPanel = React.memo(function SettingsPanel({
                     variant="outline"
                     className={`text-[9px] h-4.5 font-mono ${
                       fbStatus === "ready"
-                        ? "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/20"
+                        ? "bg-primary/10 text-primary dark:text-primary border-primary/20"
                         : "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
                     }`}
                   >
-                    <span className={`w-1 h-1 rounded-full mr-1 ${fbStatus === "ready" ? "bg-indigo-500 dark:bg-indigo-400" : "bg-red-500"}`} />
+                    <span className={`w-1 h-1 rounded-full mr-1 ${fbStatus === "ready" ? "bg-primary dark:bg-primary" : "bg-red-500"}`} />
                     {fbStatus === "ready" ? `Live ${ping !== null ? `(${ping}ms)` : ""}` : "Not Configured"}
                   </Badge>
                   <Badge
@@ -275,7 +300,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
               {/* Row 1.5: Network Latency Meter */}
               <div className="flex items-center justify-between py-1.5 border-b border-black/[0.05] dark:border-white/[0.06]">
                 <div className="flex items-center gap-2.5">
-                  <Signal className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <Signal className="w-4 h-4 text-primary dark:text-primary shrink-0" />
                   <div className="flex flex-col">
                     <span className="text-xs font-semibold text-slate-900 dark:text-white/90">Network Latency Meter</span>
                     <span className="text-[9px] text-slate-500 dark:text-white/40">Active round-trip-time heartbeat check</span>
@@ -284,14 +309,14 @@ const SettingsPanel = React.memo(function SettingsPanel({
                 <div className="flex items-center gap-2">
                   {/* Latency Signal Strength bars visualizer */}
                   <div className="flex items-end gap-[2px] h-3 px-1 select-none">
-                    <div className={`w-[3px] h-1.5 rounded-sm transition-colors duration-300 ${
-                      ping !== null && ping < 60 ? "bg-emerald-500" : ping !== null && ping <= 150 ? "bg-amber-500" : ping !== null ? "bg-rose-500 animate-pulse" : "bg-slate-300 dark:bg-slate-700"
+                    <div className={`w-[2px] h-1.5 rounded-sm transition-colors duration-300 ${
+                      ping !== null && ping < 60 ? "bg-primary" : ping !== null && ping <= 150 ? "bg-amber-500" : ping !== null ? "bg-rose-500 animate-pulse" : "bg-slate-300 dark:bg-slate-700"
                     }`} />
-                    <div className={`w-[3px] h-2.5 rounded-sm transition-colors duration-300 ${
-                      ping !== null && ping < 60 ? "bg-emerald-500" : ping !== null && ping <= 150 ? "bg-amber-500" : "bg-slate-300 dark:bg-slate-700"
+                    <div className={`w-[2px] h-2 rounded-sm transition-colors duration-300 ${
+                      ping !== null && ping < 60 ? "bg-primary" : ping !== null && ping <= 150 ? "bg-amber-500" : "bg-slate-300 dark:bg-slate-700"
                     }`} />
-                    <div className={`w-[3px] h-3.5 rounded-sm transition-colors duration-300 ${
-                      ping !== null && ping < 60 ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"
+                    <div className={`w-[2px] h-2.5 rounded-sm transition-colors duration-300 ${
+                      ping !== null && ping < 60 ? "bg-primary" : "bg-slate-300 dark:bg-slate-700"
                     }`} />
                   </div>
                   <span className={`text-xs font-mono font-bold ${getPingColorClass(ping)}`}>
@@ -300,25 +325,49 @@ const SettingsPanel = React.memo(function SettingsPanel({
                 </div>
               </div>
 
+              {/* Row 1.75: Uplink RSSI Meter */}
+              <div className="flex items-center justify-between py-1.5 border-b border-black/[0.05] dark:border-white/[0.06]">
+                <div className="flex items-center gap-2.5">
+                  <Signal className="w-4 h-4 text-primary dark:text-primary shrink-0" />
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-slate-900 dark:text-white/90">Uplink RSSI</span>
+                    <span className="text-[9px] text-slate-500 dark:text-white/40">Wireless signal strength</span>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="text-[10px] font-mono text-primary/80 uppercase">
+                    {rssiValue} dBm ({rssiInfo.label})
+                  </span>
+                  <div className="flex items-end gap-1 h-3">
+                    {[1, 2, 3, 4].map((bar) => (
+                      <div 
+                        key={bar} 
+                        className={`w-1 rounded-sm transition-all duration-300 ${
+                          bar <= rssiInfo.activeBars ? rssiInfo.color : "bg-slate-300 dark:bg-white/10"
+                        }`}
+                        style={{ height: `${20 * bar}%` }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
               {/* Connections (ESP32-CAM and WS) */}
               <div className="space-y-2.5 pt-1">
-                <span className="text-[8px] font-bold text-slate-400 dark:text-white/30 tracking-widest uppercase">Hardware Connections</span>
+                <span className="text-[10px] font-bold text-[#A0A0A0] uppercase tracking-wider">Hardware Connections</span>
                 
                 {/* ESP32-CAM */}
-                <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-slate-50/50 dark:bg-white/[0.02] border border-black/5 dark:border-white/5">
+                <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-transparent hover:bg-slate-50 dark:hover:bg-[rgba(255,255,255,0.02)] border border-transparent hover:border-slate-200 dark:hover:border-[#333] transition-colors">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Camera className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      <span className="text-[10px] font-bold uppercase text-slate-700 dark:text-white/80">ESP32-CAM Stream Host</span>
-                    </div>
+                    <span className="text-[11px] font-semibold text-slate-900 dark:text-[#E0E0E0]">ESP32-CAM Stream Host</span>
                     {streamSrc && !streamError && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 dark:bg-green-400 animate-pulse" />
+                      <span className="w-1 h-1 rounded-full bg-slate-400" />
                     )}
                   </div>
                   <div className="flex gap-1.5">
                     <input
                       type="text"
-                      className="h-7 text-xs bg-slate-100 dark:bg-white/5 text-slate-900 dark:text-white font-mono flex-1 border border-slate-200 dark:border-white/10 rounded-md px-2 focus:outline-none focus:border-blue-500/50"
+                      className="h-6 text-[10px] bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
                       placeholder="192.168.1.100"
                       value={roverIp}
                       onChange={e => setRoverIp(e.target.value)}
@@ -327,7 +376,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                     {streamSrc ? (
                       <button
                         onClick={handleDisconnectCamera}
-                        className="px-2.5 py-1 text-[10px] font-bold rounded border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"
+                        className="px-2 py-0.5 text-[9px] font-bold rounded border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"
                       >
                         Disconnect
                       </button>
@@ -335,29 +384,44 @@ const SettingsPanel = React.memo(function SettingsPanel({
                       <button
                         onClick={handleConnectCamera}
                         disabled={!roverIp.trim()}
-                        className="px-2.5 py-1 text-[10px] font-bold rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white transition-all cursor-pointer border-0"
+                        className="px-2.5 py-0.5 text-[9px] font-bold rounded bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground transition-all cursor-pointer border-0"
                       >
                         Connect
                       </button>
                     )}
                   </div>
+                  
+                  {/* Modern Camera Configuration Section */}
+                  <div className="flex items-center gap-2 mt-1.5 pt-1.5 border-t border-black/5 dark:border-[#333]">
+                    <div className="flex-1 flex items-center gap-1.5 bg-slate-100 dark:bg-black/20 rounded-md px-2 py-1 border border-transparent dark:border-[#333]">
+                      <select className="bg-transparent text-[10px] text-slate-700 dark:text-[#E0E0E0] font-mono outline-none w-full appearance-none cursor-pointer">
+                        <option value="1080p">1080p HD</option>
+                        <option value="720p">720p</option>
+                        <option value="480p">480p</option>
+                      </select>
+                    </div>
+                    <div className="flex-1 flex items-center gap-1.5 bg-slate-100 dark:bg-black/20 rounded-md px-2 py-1 border border-transparent dark:border-[#333]">
+                      <select className="bg-transparent text-[10px] text-slate-700 dark:text-[#E0E0E0] font-mono outline-none w-full appearance-none cursor-pointer">
+                        <option value="60">60 FPS</option>
+                        <option value="30">30 FPS</option>
+                        <option value="15">15 FPS</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
 
                 {/* WebSocket */}
-                <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-slate-50/50 dark:bg-white/[0.02] border border-black/5 dark:border-white/5">
+                <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-transparent hover:bg-slate-50 dark:hover:bg-[rgba(255,255,255,0.02)] border border-transparent hover:border-slate-200 dark:hover:border-[#333] transition-colors">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Activity className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                      <span className="text-[10px] font-bold uppercase text-slate-700 dark:text-white/80">WebSocket Server Endpoint</span>
-                    </div>
+                    <span className="text-[11px] font-semibold text-slate-900 dark:text-[#E0E0E0]">WebSocket Server Endpoint</span>
                     {roverConnectionStatus === "connected" && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 dark:bg-green-400 animate-pulse" />
+                      <span className="w-1 h-1 rounded-full bg-slate-400" />
                     )}
                   </div>
                   <div className="flex gap-1.5">
                     <input
                       type="text"
-                      className="h-7 text-xs bg-slate-100 dark:bg-white/5 text-slate-900 dark:text-white font-mono flex-1 border border-slate-200 dark:border-white/10 rounded-md px-2 focus:outline-none focus:border-emerald-500/50"
+                      className="h-6 text-[10px] bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
                       placeholder="ws://192.168.1.100:81"
                       value={wsUrl}
                       onChange={e => setWsUrl(e.target.value)}
@@ -365,7 +429,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                     {roverConnectionStatus === "connected" ? (
                       <button
                         onClick={handleDisconnectWs}
-                        className="px-2.5 py-1 text-[10px] font-bold rounded border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"
+                        className="px-2 py-0.5 text-[9px] font-bold rounded border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"
                       >
                         Disconnect
                       </button>
@@ -373,7 +437,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                       <button
                         onClick={handleConnectWs}
                         disabled={roverConnectionStatus === "connecting"}
-                        className="px-2.5 py-1 text-[10px] font-bold rounded bg-emerald-600 hover:bg-emerald-750 disabled:opacity-50 text-white transition-all cursor-pointer border-0"
+                        className="px-2.5 py-0.5 text-[9px] font-bold rounded bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground transition-all cursor-pointer border-0"
                       >
                         {roverConnectionStatus === "connecting" ? "Connecting..." : "Connect"}
                       </button>
@@ -383,18 +447,18 @@ const SettingsPanel = React.memo(function SettingsPanel({
               </div>
 
               {/* Row 4: ESP32 Firmware reboot */}
-              <div className="flex items-center justify-between py-2 border-t border-black/10 dark:border-white/10 mt-1 shrink-0">
+              <div className="flex items-center justify-between py-2 border-t border-black/10 dark:border-[#333] mt-1 shrink-0">
                 <div className="flex items-center gap-2.5">
-                  <RotateCcw className="w-4 h-4 text-rose-500 dark:text-rose-400 shrink-0" />
+                  <RotateCcw className="w-4 h-4 text-[#A0A0A0] shrink-0" />
                   <div className="flex flex-col">
-                    <span className="text-xs font-semibold text-slate-900 dark:text-white/90">Firmware Restart</span>
-                    <span className="text-[9px] text-slate-500 dark:text-white/40">Remote soft-reboot trigger for ESP32</span>
+                    <span className="text-xs font-semibold text-slate-900 dark:text-[#E0E0E0]">Firmware Restart</span>
+                    <span className="text-[9px] text-[#A0A0A0]">Remote soft-reboot trigger for ESP32</span>
                   </div>
                 </div>
                 <button
                   onClick={handleReboot}
                   disabled={rebooting}
-                  className="px-3 py-1.5 text-[10px] font-bold rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 disabled:opacity-50 transition-all flex items-center justify-center cursor-pointer shadow-md min-w-[90px]"
+                  className="px-3 py-1.5 text-[9px] font-bold rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary dark:text-primary hover:text-primary/90 disabled:opacity-50 transition-all flex items-center justify-center cursor-pointer shadow-sm min-w-[90px]"
                 >
                   {rebooting ? (
                     <>
@@ -406,7 +470,6 @@ const SettingsPanel = React.memo(function SettingsPanel({
                   )}
                 </button>
               </div>
-
             </div>
           </motion.div>
         </div>
@@ -525,17 +588,17 @@ const DPad = React.memo(function DPad({
 }: DPadProps) {
   const getButtonClass = (dir: Direction) => {
     const isActive = activeDirection === dir;
-    return `w-12 h-12 sm:w-16 sm:h-16 flex items-center justify-center cursor-pointer transition-all duration-300 ${
+    return `w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ${
       isActive
-        ? "scale-90 bg-indigo-600 border-2 border-indigo-650 text-white shadow-inner shadow-black/30 ring-4 ring-indigo-500/30 rounded-xl"
-        : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-indigo-500 hover:bg-slate-50 text-slate-800 rounded-xl"
+        ? "scale-90 bg-primary border-2 border-primary text-primary-foreground shadow-inner shadow-black/30 ring-4 ring-primary/30 rounded-xl neon-glow-cyan"
+        : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-primary hover:bg-slate-50 text-slate-800 rounded-xl dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:border-primary/50 dark:hover:text-primary"
     }`;
   };
 
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-2">
-      <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Drive Controls</div>
-      <div className="flex flex-col items-center gap-2 sm:gap-3 select-none">
+    <div className="flex flex-col items-center justify-between h-full w-full py-1">
+      <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mt-1">Drive Controls</div>
+      <div className="flex flex-col items-center gap-2 select-none mb-1">
         <button
           className={getButtonClass("forward")}
           onMouseDown={() => onPress("forward")} onMouseUp={onRelease} onMouseLeave={onRelease}
@@ -543,7 +606,7 @@ const DPad = React.memo(function DPad({
           data-testid="btn-move-fwd">
           <ArrowUp className="w-5 h-5 sm:w-6 sm:h-6" />
         </button>
-        <div className="flex gap-2 sm:gap-3">
+        <div className="flex gap-2">
           <button
             className={getButtonClass("left")}
             onMouseDown={() => onPress("left")} onMouseUp={onRelease} onMouseLeave={onRelease}
@@ -552,10 +615,10 @@ const DPad = React.memo(function DPad({
             <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
           <button
-            className={`w-12 h-12 sm:w-16 sm:h-16 flex items-center justify-center cursor-pointer transition-all duration-300 ${
+            className={`w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ${
               activeDirection === "stop"
-                ? "scale-90 bg-red-600 border-2 border-red-650 text-white shadow-inner shadow-black/30 ring-4 ring-red-500/30 rounded-xl"
-                : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-red-500 hover:bg-slate-50 text-red-600 rounded-xl"
+                ? "scale-90 bg-destructive border-2 border-destructive text-destructive-foreground shadow-inner shadow-black/30 ring-4 ring-destructive/30 rounded-xl neon-glow-violet"
+                : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-destructive hover:bg-slate-50 text-destructive rounded-xl dark:border-white/10 dark:bg-transparent dark:text-destructive dark:hover:border-destructive/50"
             }`}
             onClick={onStop} data-testid="btn-move-stop">
             <Square className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
@@ -575,11 +638,11 @@ const DPad = React.memo(function DPad({
           data-testid="btn-move-back">
           <ArrowDown className="w-5 h-5 sm:w-6 sm:h-6" />
         </button>
-        <div className="h-5 mt-1">
+        <div className="h-4">
           <AnimatePresence>
             {activeDirection && (
               <motion.span key={activeDirection} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                className="text-xs font-mono font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest" data-testid="text-active-direction">
+                className="text-[10px] font-mono font-semibold text-primary uppercase tracking-widest" data-testid="text-active-direction">
                 ▶ {activeDirection}
               </motion.span>
             )}
@@ -779,15 +842,22 @@ const ArmControls = React.memo(function ArmControls({
         </div>
       </div>
 
-      <div className="arm-presets-grid grid grid-cols-4 gap-1">
-        {ARM_PRESETS.map(p => (
-          <button key={p.name} onClick={() => applyPreset(p)}
-            className="text-[11px] py-1 px-1 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all text-muted-foreground hover:text-foreground font-medium cursor-pointer"
-            data-testid={`btn-preset-${p.name.toLowerCase()}`}>{p.name}</button>
-        ))}
+      <div className="arm-presets-grid grid grid-cols-4 gap-2 px-1 pb-1">
+        {ARM_PRESETS.map(p => {
+          const isActive = joints.base === p.joints.base && joints.shoulder === p.joints.shoulder && joints.elbow === p.joints.elbow && joints.wrist === p.joints.wrist && joints.gripper === p.joints.gripper;
+          return (
+            <button key={p.name} onClick={() => applyPreset(p)}
+              className={`text-[11px] py-1.5 px-1 rounded-md border transition-all font-semibold cursor-pointer active:scale-95 shadow-sm ${
+                isActive 
+                  ? "bg-primary text-primary-foreground border-primary shadow-[0_0_8px_rgba(var(--primary),0.5)]" 
+                  : "bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/20 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 hover:border-primary dark:hover:border-primary hover:text-primary dark:hover:text-primary"
+              }`}
+              data-testid={`btn-preset-${p.name.toLowerCase()}`}>{p.name}</button>
+          );
+        })}
       </div>
 
-      <div className="arm-canvas-sliders-flex flex flex-col md:flex-row gap-4 md:gap-2 items-center bg-white/5 border border-white/10 rounded-xl p-3 md:p-1.5 md:py-2 w-full font-sans backdrop-blur-md shadow-lg">
+      <div className="arm-canvas-sliders-flex flex flex-col md:flex-row gap-4 md:gap-2 items-center bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-3 md:p-1.5 md:py-2 w-full font-sans backdrop-blur-md shadow-lg">
         <div className="arm-canvas-wrapper relative w-[130px] h-[80px] rounded-lg border border-white/10 bg-black/40 overflow-hidden shrink-0 flex items-center justify-center shadow-inner">
           <canvas ref={canvasRef} width={130} height={80} className="w-full h-full block" />
         </div>
@@ -809,15 +879,27 @@ const ArmControls = React.memo(function ArmControls({
                 </div>
                 
                 {/* Control Row: Dec button, Slider, Inc button, Desktop Value */}
-                <div className="arm-slider-control-row flex items-center gap-2 flex-1 w-full">
+                <div className="arm-slider-control-row flex items-center gap-2 flex-1 w-full relative">
                   <button onClick={() => updateJoint(key, -stepSize)}
                     className="h-6 w-6 md:h-5 md:w-5 shrink-0 rounded border border-white/10 flex items-center justify-center text-xs md:text-[10px] bg-white/5 hover:bg-white/10 hover:border-white/20 active:scale-90 transition-all font-semibold cursor-pointer text-foreground select-none"
                     data-testid={`btn-arm-${key}-dec`}>−</button>
-                  <input type="range" min={0} max={180} value={value}
-                    onChange={e => setJointAngle(key, Number(e.target.value))}
-                    className="joint-slider flex-1 h-2 md:h-1.5 cursor-pointer"
-                    style={{ accentColor: cfg.color }}
-                    data-testid={`slider-arm-${key}`} />
+                  
+                  <div className="relative flex-1 group flex items-center h-full">
+                    {/* Floating Badge */}
+                    <div className="absolute -top-7 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none select-none z-10" style={{ left: `calc(${(value / 180) * 100}%)` }}>
+                       <div className="px-1.5 py-0.5 rounded-md bg-slate-900 dark:bg-black/80 border border-white/10 text-[9px] font-mono text-white shadow-[0_0_10px_rgba(0,0,0,0.5)] backdrop-blur-md">
+                          {value}°
+                       </div>
+                       <div className="w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px] border-t-white/10 absolute -bottom-[4px] left-1/2 transform -translate-x-1/2" />
+                    </div>
+                    
+                    <input type="range" min={0} max={180} value={value}
+                      onChange={e => setJointAngle(key, Number(e.target.value))}
+                      className="joint-slider w-full h-1 md:h-1 cursor-pointer"
+                      style={{ color: cfg.color }}
+                      data-testid={`slider-arm-${key}`} />
+                  </div>
+
                   <button onClick={() => updateJoint(key, stepSize)}
                     className="h-6 w-6 md:h-5 md:w-5 shrink-0 rounded border border-white/10 flex items-center justify-center text-xs md:text-[10px] bg-white/5 hover:bg-white/10 hover:border-white/20 active:scale-90 transition-all font-semibold cursor-pointer text-foreground select-none"
                     data-testid={`btn-arm-${key}-inc`}>+</button>
@@ -861,10 +943,19 @@ const ArmControls = React.memo(function ArmControls({
 export default function Dashboard() {
   const { theme, setTheme } = useTheme();
 
+  const [isRecording, setIsRecording] = useState(false);
+  const handleCapturePhoto = useCallback(() => {
+    console.log(`${LOG} Capturing photo...`);
+  }, []);
+  const handleRecordVideo = useCallback(() => {
+    setIsRecording(prev => !prev);
+    console.log(`${LOG} Toggling recording...`);
+  }, []);
 
   // ── Live telemetry from Firebase
   const [liveTelemetry, setLiveTelemetry] = useState<{
     distance?: number; solar?: number; motor_temp?: number; rssi?: number;
+    batteryPercent?: number; batteryVoltage?: number;
   }>({});
 
   const distance  = liveTelemetry.distance;
@@ -1092,7 +1183,7 @@ export default function Dashboard() {
   }, []);
 
   // ── 5DOF Arm
-  const [joints, setJoints] = useState<ArmAngles>({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 0 });
+  const [joints, setJoints] = useState<ArmAngles>(DEFAULT_JOINTS);
   const resetAnimRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const updateJoint = useCallback((joint: keyof ArmAngles, delta: number) => {
@@ -1581,6 +1672,7 @@ export default function Dashboard() {
         ping={ping}
         rebooting={rebooting}
         handleReboot={handleReboot}
+        rssi={rssi}
       />
 
       {/* Camera View Section (Top - Max 48dvh Viewport Height Budget) */}
@@ -1803,6 +1895,11 @@ export default function Dashboard() {
             distance={distance}
             setStreamError={setStreamError}
           />
+          <CameraOverlay 
+            onCapturePhoto={handleCapturePhoto} 
+            onRecordVideo={handleRecordVideo} 
+            isRecording={isRecording} 
+          />
         </div>
       </div>
 
@@ -1839,9 +1936,9 @@ export default function Dashboard() {
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
                 className="px-4 py-3 md:h-full md:overflow-hidden flex items-center justify-center">
-                <div className="your-main-control-container grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-3 max-w-5xl w-full mx-auto items-start md:items-center justify-items-center py-4 px-2">
+                <div className="your-main-control-container flex flex-col md:flex-row items-center justify-center gap-6 md:gap-8 w-full max-w-5xl mx-auto py-4 px-2">
                   {/* LEFT: Drive D-Pad */}
-                  <div className="drive-control-section flex items-center justify-center w-full">
+                  <div className="drive-control-section shrink-0 w-[240px] h-[240px] bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-3 backdrop-blur-md shadow-lg relative">
                     <DPad
                       activeDirection={activeDirection}
                       onPress={handleDirectionPress}
@@ -1851,7 +1948,7 @@ export default function Dashboard() {
                   </div>
 
                   {/* RIGHT: 5DOF Arm */}
-                  <div className="arm-control-section flex items-center justify-center w-full">
+                  <div className="arm-control-section shrink-0 w-full max-w-[480px] flex flex-col items-center justify-center">
                     <ArmControls
                       joints={joints}
                       setJointAngle={setJointAngle}
@@ -1985,7 +2082,7 @@ export default function Dashboard() {
                 transition={{ duration: 0.15, ease: "easeOut" }}
                 className="md:h-full flex items-center justify-center p-3 md:overflow-hidden">
 
-                <div className="flex flex-col items-center justify-between p-5 space-y-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md md:max-h-[42dvh] shadow-xl relative overflow-hidden select-none">
+                <div className="flex flex-col items-center px-5 pt-4 pb-2 gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md shadow-xl relative overflow-hidden select-none">
                   <div className="flex items-center justify-between w-full border-b border-slate-100 dark:border-slate-800 pb-3">
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">Voice Link</span>
                     <select
@@ -2030,7 +2127,7 @@ export default function Dashboard() {
                   </div>
                   
                   {/* Live Transcript Display Box */}
-                  <div className="w-full text-center min-h-[1.5rem] mt-1">
+                  <div className="w-full text-center">
                     <p className="text-xs text-slate-500 dark:text-slate-400 italic font-medium" id="voice-transcript-preview">
                       {isListening ? "Listening..." : "Click button to speak"}
                     </p>

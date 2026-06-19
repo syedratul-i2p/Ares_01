@@ -133,42 +133,59 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  --background: 240 10% 3.9%;
+  --background: 230 23% 6%;
   --foreground: 0 0% 98%;
-  --border: 240 3.7% 15.9%;
-  --card: 240 10% 3.9%;
+  --border: 230 30% 15%;
+  --card: 230 23% 6%;
   --card-foreground: 0 0% 98%;
-  --card-border: 240 3.7% 15.9%;
-  --sidebar: 240 5.9% 10%;
+  --card-border: 230 30% 15%;
+  --sidebar: 230 23% 6%;
   --sidebar-foreground: 240 4.8% 95.9%;
-  --sidebar-border: 240 3.7% 15.9%;
-  --sidebar-primary: 217.2 91.2% 59.8%;
+  --sidebar-border: 230 30% 15%;
+  --sidebar-primary: 243 75% 59%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 240 3.7% 15.9%;
+  --sidebar-accent: 223 30% 15%;
   --sidebar-accent-foreground: 240 4.8% 95.9%;
-  --sidebar-ring: 217.2 91.2% 59.8%;
-  --popover: 240 10% 3.9%;
+  --sidebar-ring: 243 75% 59%;
+  --popover: 223 38% 7%;
   --popover-foreground: 0 0% 98%;
-  --popover-border: 240 3.7% 15.9%;
-  --primary: 217.2 91.2% 59.8%;
-  --primary-foreground: 222.2 47.4% 11.2%;
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 240 3.7% 15.9%;
+  --popover-border: 223 30% 15%;
+  --primary: 243 75% 59%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 258 90% 66%;
+  --secondary-foreground: 0 0% 100%;
+  --muted: 223 30% 15%;
   --muted-foreground: 240 5% 64.9%;
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
+  --accent: 258 90% 66%;
+  --accent-foreground: 0 0% 100%;
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 0 0% 98%;
-  --input: 240 3.7% 15.9%;
-  --ring: 217.2 91.2% 59.8%;
+  --input: 223 30% 15%;
+  --ring: 243 75% 59%;
 
-  --chart-1: 220 70% 50%;
-  --chart-2: 160 60% 45%;
+  --chart-1: 189 94% 43%;
+  --chart-2: 258 90% 66%;
   --chart-3: 30 80% 55%;
   --chart-4: 280 65% 60%;
   --chart-5: 340 75% 55%;
 }
+
+@utility neon-glow-cyan {
+  box-shadow: 0 0 10px 0px rgba(6, 182, 212, 0.5), inset 0 0 5px 0px rgba(6, 182, 212, 0.2);
+}
+
+@utility neon-glow-violet {
+  box-shadow: 0 0 10px 0px rgba(139, 92, 246, 0.5), inset 0 0 5px 0px rgba(139, 92, 246, 0.2);
+}
+
+@utility cyber-card {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(4px);
+  border-radius: 1rem;
+  border: 1px solid rgba(0, 255, 255, 0.15);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
 
 @layer base {
   * {
@@ -179,14 +196,14 @@
   }
 }
 
-/* ── Joint Range Slider ─────────────────────────────────────────────────── */
+/* ── Joint Range Slider (Premium Modern) ─────────────────────────────────────────────────── */
 .joint-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 6px;
+  height: 3px;
   border-radius: 9999px;
-  background: hsl(var(--muted));
+  background: rgba(150, 150, 150, 0.2);
   outline: none;
   cursor: pointer;
   transition: background 0.15s;
@@ -195,34 +212,35 @@
 .joint-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: hsl(var(--primary));
+  background: currentColor;
   border: 2px solid hsl(var(--background));
-  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.35);
+  box-shadow: 0 0 8px currentColor;
   cursor: grab;
-  transition: box-shadow 0.15s, transform 0.1s;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 .joint-slider::-webkit-slider-thumb:active {
   cursor: grabbing;
-  transform: scale(1.2);
-  box-shadow: 0 0 0 4px hsl(var(--primary) / 0.25);
+  transform: scale(1.25);
+  box-shadow: 0 0 12px currentColor;
 }
 
 .joint-slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: hsl(var(--primary));
+  background: currentColor;
   border: 2px solid hsl(var(--background));
-  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.35);
+  box-shadow: 0 0 8px currentColor;
   cursor: grab;
-  transition: box-shadow 0.15s, transform 0.1s;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 .joint-slider::-moz-range-thumb:active {
   cursor: grabbing;
-  transform: scale(1.2);
+  transform: scale(1.25);
+  box-shadow: 0 0 12px currentColor;
 }
 
 /* ── Command Input Focus Glow ───────────────────────────────────────────── */
