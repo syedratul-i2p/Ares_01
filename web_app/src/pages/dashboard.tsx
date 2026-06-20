@@ -26,6 +26,9 @@ import {
   setFirebaseControlMode,
   setFirebaseLanguage,
   writePingRTT,
+  subscribeDbConnection,
+  syncMissionStatus,
+  appendCommandLog,
   type DriveDirection,
   type ArmAngles,
 } from "@/lib/firebase";
@@ -505,6 +508,7 @@ const CameraView = React.memo(function CameraView({
     >
       {streamSrc && !streamError ? (
         <img
+          id="rover-video-stream"
           src={streamSrc}
           alt="ARES-01 live feed"
           className="w-full h-full object-cover transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
@@ -695,21 +699,25 @@ const ArmControls = React.memo(function ArmControls({
     // Clear Canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw grid background
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.03)";
+    // 1. Deep Tech Screen Background
+    ctx.fillStyle = "#0f172a"; // slate-900 (deep dark blue)
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Professional HUD Engineering Grid
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.1)"; // faint cyan tech grid
     ctx.lineWidth = 1;
-    for (let x = 10; x < canvas.width; x += 10) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvas.height);
-      ctx.stroke();
+    for (let x = canvas.width / 2; x < canvas.width; x += 15) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(canvas.width - x, 0); ctx.lineTo(canvas.width - x, canvas.height); ctx.stroke();
     }
-    for (let y = 10; y < canvas.height; y += 10) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.width, y);
-      ctx.stroke();
+    for (let y = canvas.height - 12; y > 0; y -= 15) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
     }
+    // Center axis line
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.25)";
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath(); ctx.moveTo(canvas.width / 2, 0); ctx.lineTo(canvas.width / 2, canvas.height); ctx.stroke();
+    ctx.setLineDash([]);
 
     // Geometry parameters (scaled to fit nicely in 150x110)
     const x0 = canvas.width / 2; // base center x
@@ -736,91 +744,106 @@ const ArmControls = React.memo(function ArmControls({
     const x3 = x2 + L3 * Math.cos(wrAngleAbsRad);
     const y3 = y2 - L3 * Math.sin(wrAngleAbsRad);
 
-    // Draw rotating base disk
-    ctx.fillStyle = JOINT_CONFIG.base.color;
-    ctx.beginPath();
-    ctx.ellipse(x0, y0, 20 + 5 * Math.sin(baseAngleRad), 6, 0, 0, 2 * Math.PI);
-    ctx.fill();
+    // 2. High-Tech Base Mount
+    const drawTechBase = (x: number, y: number, color: string) => {
+       // Outer Base Platform
+       ctx.fillStyle = "#1e293b"; // slate-800
+       ctx.beginPath();
+       ctx.ellipse(x, y + 2, 24, 7, 0, 0, 2 * Math.PI);
+       ctx.fill();
+
+       // Glowing Inner Ring
+       ctx.shadowBlur = 10;
+       ctx.shadowColor = color;
+       ctx.strokeStyle = color;
+       ctx.lineWidth = 2;
+       ctx.beginPath();
+       ctx.ellipse(x, y, 20 + 4 * Math.sin(baseAngleRad), 5, 0, 0, 2 * Math.PI);
+       ctx.stroke();
+       ctx.shadowBlur = 0;
+       
+       // Center Hub
+       ctx.fillStyle = color;
+       ctx.globalAlpha = 0.7;
+       ctx.beginPath();
+       ctx.ellipse(x, y, 8, 3, 0, 0, 2 * Math.PI);
+       ctx.fill();
+       ctx.globalAlpha = 1.0;
+    };
 
     // Pedestal stem
-    ctx.strokeStyle = "#475569";
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x0, y0 + 10);
-    ctx.stroke();
+    ctx.fillStyle = "#334155";
+    ctx.fillRect(x0 - 5, y0, 10, 12);
+    ctx.fillStyle = "#475569"; // highlight
+    ctx.fillRect(x0 - 3, y0, 6, 12);
 
-    // Draw Links (bones)
-    ctx.shadowBlur = 4;
-    ctx.shadowColor = "rgba(0, 0, 0, 0.3)";
+    drawTechBase(x0, y0, JOINT_CONFIG.base.color);
 
-    // Link 1 (Shoulder)
-    ctx.strokeStyle = JOINT_CONFIG.shoulder.color;
-    ctx.lineWidth = 5;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.stroke();
+    // 3. Robotic Links with metallic styling and colored core
+    const drawTechLink = (startX: number, startY: number, endX: number, endY: number, color: string, width: number) => {
+      // Outer metallic casing
+      ctx.strokeStyle = "#334155"; // slate-700
+      ctx.lineWidth = width + 2;
+      ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(endX, endY); ctx.stroke();
+      
+      // Colored LED Core
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = color;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width - 1.5;
+      ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(endX, endY); ctx.stroke();
+      
+      // Center highlight line
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = "rgba(255,255,255,0.7)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(endX, endY); ctx.stroke();
+    };
 
-    // Link 2 (Elbow)
-    ctx.strokeStyle = JOINT_CONFIG.elbow.color;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
-
-    // Link 3 (Wrist)
-    ctx.strokeStyle = JOINT_CONFIG.wrist.color;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(x2, y2);
-    ctx.lineTo(x3, y3);
-    ctx.stroke();
-
-    ctx.shadowBlur = 0;
+    drawTechLink(x0, y0, x1, y1, JOINT_CONFIG.shoulder.color, 6);
+    drawTechLink(x1, y1, x2, y2, JOINT_CONFIG.elbow.color, 5);
+    drawTechLink(x2, y2, x3, y3, JOINT_CONFIG.wrist.color, 4);
 
     // Draw Gripper Claws
     const gripVal = joints.gripper;
     const clawSpread = (gripVal / 180) * 0.5 + 0.15; // claw angular spread in rad
     const clawLen = 8;
     
-    // Left claw finger
     const lfAngle = wrAngleAbsRad - clawSpread;
     const xLf = x3 + clawLen * Math.cos(lfAngle);
     const yLf = y3 - clawLen * Math.sin(lfAngle);
-    ctx.strokeStyle = JOINT_CONFIG.gripper.color;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(x3, y3);
-    ctx.lineTo(xLf, yLf);
-    ctx.stroke();
-
-    // Right claw finger
+    
     const rfAngle = wrAngleAbsRad + clawSpread;
     const xRf = x3 + clawLen * Math.cos(rfAngle);
     const yRf = y3 - clawLen * Math.sin(rfAngle);
-    ctx.beginPath();
-    ctx.moveTo(x3, y3);
-    ctx.lineTo(xRf, yRf);
-    ctx.stroke();
 
-    // Draw Joint Node dots
-    const drawJointNode = (x: number, y: number, color: string, r: number) => {
+    drawTechLink(x3, y3, xLf, yLf, JOINT_CONFIG.gripper.color, 3.5);
+    drawTechLink(x3, y3, xRf, yRf, JOINT_CONFIG.gripper.color, 3.5);
+
+    // 4. Professional Engineering Joints
+    const drawProJoint = (x: number, y: number, color: string, r: number) => {
+      // Outer dark steel ring
+      ctx.fillStyle = "#1e293b"; // slate-800
+      ctx.beginPath(); ctx.arc(x, y, r + 2.5, 0, 2 * Math.PI); ctx.fill();
+      
+      // Middle colored ring
       ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, 2 * Math.PI);
-      ctx.fill();
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, r + 0.5, 0, 2 * Math.PI); ctx.fill();
+
+      // Inner dark gap
+      ctx.fillStyle = "#0f172a"; // slate-900
+      ctx.beginPath(); ctx.arc(x, y, r - 1, 0, 2 * Math.PI); ctx.fill();
+
+      // Center silver pivot pin
+      ctx.fillStyle = "#cbd5e1"; // slate-300
+      ctx.beginPath(); ctx.arc(x, y, r * 0.4, 0, 2 * Math.PI); ctx.fill();
     };
 
-    drawJointNode(x0, y0, JOINT_CONFIG.base.color, 4);
-    drawJointNode(x1, y1, JOINT_CONFIG.shoulder.color, 4);
-    drawJointNode(x2, y2, JOINT_CONFIG.elbow.color, 4);
-    drawJointNode(x3, y3, JOINT_CONFIG.wrist.color, 3.5);
+    drawProJoint(x0, y0, JOINT_CONFIG.base.color, 4.5);
+    drawProJoint(x1, y1, JOINT_CONFIG.shoulder.color, 4.5);
+    drawProJoint(x2, y2, JOINT_CONFIG.elbow.color, 4);
+    drawProJoint(x3, y3, JOINT_CONFIG.wrist.color, 3.5);
   }, [joints]);
 
   return (
@@ -858,7 +881,7 @@ const ArmControls = React.memo(function ArmControls({
       </div>
 
       <div className="arm-canvas-sliders-flex flex flex-col md:flex-row gap-4 md:gap-2 items-center bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-3 md:p-1.5 md:py-2 w-full font-sans backdrop-blur-md shadow-lg">
-        <div className="arm-canvas-wrapper relative w-[130px] h-[80px] rounded-lg border border-white/10 bg-black/40 overflow-hidden shrink-0 flex items-center justify-center shadow-inner">
+        <div className="arm-canvas-wrapper relative w-[130px] h-[80px] rounded-lg border border-slate-700 bg-slate-900 overflow-hidden shrink-0 flex items-center justify-center shadow-[inset_0_2px_15px_rgba(0,0,0,0.6)]">
           <canvas ref={canvasRef} width={130} height={80} className="w-full h-full block" />
         </div>
 
@@ -943,14 +966,116 @@ const ArmControls = React.memo(function ArmControls({
 export default function Dashboard() {
   const { theme, setTheme } = useTheme();
 
+  // ── Network / Connection State
+  const [roverConnectionStatus, setRoverConnectionStatus] = useState<RoverConnectionStatus>("disconnected");
+  const [ping, setPing] = useState<number | null>(null);
+  const [wsUrl, setWsUrl] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+
+  // ── WebSocket References
+  const wsRef = useRef<WebSocket | null>(null);
+  const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pingStartTimeRef = useRef<number>(0);
+
   const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const reqFrameRef = useRef<number>(0);
+
   const handleCapturePhoto = useCallback(() => {
-    console.log(`${LOG} Capturing photo...`);
+    const img = document.getElementById('rover-video-stream') as HTMLImageElement;
+    if (!img) {
+      console.warn(`${LOG} Cannot capture: Video stream element not found.`);
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth || 800;
+    canvas.height = img.naturalHeight || 600;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      a.download = `ARES-01_Photo_${timestamp}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      console.log(`${LOG} Photo captured and downloaded.`);
+    }
   }, []);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    console.log(`${LOG} Video recording stopped.`);
+  }, []);
+
+  const startRecording = useCallback(() => {
+    setIsRecording(true);
+    console.log(`${LOG} Video recording UI started.`);
+
+    const img = document.getElementById('rover-video-stream') as HTMLImageElement;
+    if (!img) {
+      console.warn(`${LOG} Camera stream not found. Recording UI will run, but no video will be saved.`);
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth || 800;
+    canvas.height = img.naturalHeight || 600;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Continuously draw the img stream to the canvas
+    const drawFrame = () => {
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      reqFrameRef.current = requestAnimationFrame(drawFrame);
+    };
+    drawFrame();
+
+    // Capture a 30fps MediaStream from the canvas
+    const stream = canvas.captureStream(30);
+    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+    
+    recordedChunksRef.current = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        recordedChunksRef.current.push(e.data);
+      }
+    };
+    
+    recorder.onstop = () => {
+      cancelAnimationFrame(reqFrameRef.current);
+      if (recordedChunksRef.current.length === 0) return;
+      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      a.download = `ARES-01_Video_${timestamp}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
+
+    recorder.start();
+    mediaRecorderRef.current = recorder;
+  }, []);
+
   const handleRecordVideo = useCallback(() => {
-    setIsRecording(prev => !prev);
-    console.log(`${LOG} Toggling recording...`);
-  }, []);
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  }, [isRecording, startRecording, stopRecording]);
 
   // ── Live telemetry from Firebase
   const [liveTelemetry, setLiveTelemetry] = useState<{
@@ -982,17 +1107,21 @@ export default function Dashboard() {
 
   // ── Rover heartbeat / Firebase connection
   const [roverOnline, setRoverOnline] = useState(false);
-  const [fbStatus] = useState<"ready" | "not-configured">(
-    firebaseConfigured ? "ready" : "not-configured"
-  );
+  const [fbStatus, setFbStatus] = useState<"ready" | "not-configured">("not-configured");
 
   useEffect(() => {
     if (!firebaseConfigured) return;
-    const unsub = subscribeTelemetry(
+    const unsubTelemetry = subscribeTelemetry(
       data => setLiveTelemetry(prev => ({ ...prev, ...data })),
       online => setRoverOnline(online)
     );
-    return unsub;
+    const unsubDb = subscribeDbConnection((connected) => {
+      setFbStatus(connected ? "ready" : "not-configured");
+    });
+    return () => {
+      unsubTelemetry();
+      unsubDb();
+    };
   }, []);
 
   // ── Control Mode
@@ -1002,25 +1131,41 @@ export default function Dashboard() {
     await setFirebaseControlMode(mode);
   }, []);
 
+  // Sync mission status asynchronously
+  useEffect(() => {
+    if (!firebaseConfigured) return;
+    syncMissionStatus({
+      mode: controlMode,
+      ping: ping,
+      battery: liveTelemetry.solar || null,
+    });
+  }, [controlMode, ping, liveTelemetry.solar]);
+
   // ── D-Pad
   const [activeDirection, setActiveDirection] = useState<Direction | null>(null);
 
   const handleDirectionPress = useCallback((dir: Direction) => {
     setActiveDirection(dir);
     const fbDir = dir.toUpperCase() as DriveDirection;
-    console.log(`${LOG} Drive: ${fbDir}`);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ event: "drive", command: fbDir }));
+    }
     setDriveDirection(fbDir);
   }, []);
 
   const handleDirectionRelease = useCallback(() => {
     setActiveDirection(null);
-    console.log(`${LOG} Drive: STOP`);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ event: "drive", command: "STOP" }));
+    }
     setDriveDirection("STOP");
   }, []);
 
   const handleStop = useCallback(() => {
     setActiveDirection(null);
-    console.log(`${LOG} Drive: STOP (manual)`);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ event: "drive", command: "STOP" }));
+    }
     setDriveDirection("STOP");
   }, []);
 
@@ -1092,7 +1237,9 @@ export default function Dashboard() {
       }
 
       setActiveDirection(dir);
-      console.log(`${LOG} Keyboard Drive: ${fbDir}`);
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ event: "drive", command: fbDir }));
+      }
       setDriveDirection(fbDir);
     };
 
@@ -1112,7 +1259,9 @@ export default function Dashboard() {
         
         if (key === " " || activeKeysRef.current.size === 0) {
           setActiveDirection(null);
-          console.log(`${LOG} Keyboard Drive: STOP`);
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ event: "drive", command: "STOP" }));
+          }
           setDriveDirection("STOP");
         } else {
           // Transition to the next remaining active key
@@ -1157,6 +1306,9 @@ export default function Dashboard() {
               return;
           }
           setActiveDirection(dir);
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ event: "drive", command: fbDir }));
+          }
           setDriveDirection(fbDir);
         }
       }
@@ -1166,7 +1318,9 @@ export default function Dashboard() {
       if (activeKeysRef.current.size > 0) {
         activeKeysRef.current.clear();
         setActiveDirection(null);
-        console.log(`${LOG} Keyboard Drive: STOP (window blur)`);
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ event: "drive", command: "STOP" }));
+        }
         setDriveDirection("STOP");
       }
     };
@@ -1189,7 +1343,9 @@ export default function Dashboard() {
   const updateJoint = useCallback((joint: keyof ArmAngles, delta: number) => {
     setJoints(prev => {
       const next = { ...prev, [joint]: Math.max(0, Math.min(180, prev[joint] + delta)) };
-      console.log(`${LOG} Arm: ${joint} → ${next[joint]}°`);
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ event: "arm", angles: next }));
+      }
       setArmAngles(next);
       return next;
     });
@@ -1199,6 +1355,9 @@ export default function Dashboard() {
     const val = Math.max(0, Math.min(180, raw));
     setJoints(prev => {
       const next = { ...prev, [joint]: val };
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ event: "arm", angles: next }));
+      }
       setArmAngles(next);
       return next;
     });
@@ -1206,7 +1365,6 @@ export default function Dashboard() {
 
   const animateJointsTo = useCallback((target: ArmAngles, label: string) => {
     if (resetAnimRef.current) clearInterval(resetAnimRef.current);
-    console.log(`${LOG} Arm → ${label}`);
     const start = { ...joints };
     const steps = 24;
     let step = 0;
@@ -1221,6 +1379,9 @@ export default function Dashboard() {
         gripper:  Math.round(start.gripper  + (target.gripper  - start.gripper)  * t),
       };
       setJoints(next);
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ event: "arm", angles: next }));
+      }
       if (step >= steps) {
         clearInterval(resetAnimRef.current!);
         resetAnimRef.current = null;
@@ -1279,6 +1440,25 @@ export default function Dashboard() {
     const label = ACTION_LABELS[result.action];
     console.log(`${LOG} AI Command [Auto-Detect: ${detectedLang}]: "${cmdText}" → ${result.action} (${result.confidence})`);
 
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        event: "ai_directive",
+        raw_text: cmdText,
+        parsed_intent: {
+          action: result.action,
+          value: ""
+        }
+      }));
+    }
+
+    if (firebaseConfigured) {
+      appendCommandLog({
+        raw_text: cmdText,
+        parsed_intent: result.action,
+        timestamp: Date.now()
+      });
+    }
+
     const userMsg: LogMessage = {
       id: Date.now(),
       sender: "user",
@@ -1288,7 +1468,7 @@ export default function Dashboard() {
       status: result.action === "UNKNOWN" ? "warn" : "ok",
     };
 
-    setHistory(prev => [userMsg, ...prev].slice(0, 10));
+    setHistory(prev => [userMsg, ...prev].slice(0, 15));
     setIsProcessing(true);
 
     try {
@@ -1313,7 +1493,7 @@ export default function Dashboard() {
           time: new Date().toLocaleTimeString(),
           status: "ok",
         };
-        setHistory(prev => [sysMsg, ...prev].slice(0, 10));
+        setHistory(prev => [sysMsg, ...prev].slice(0, 15));
         setIsProcessing(false);
       }, 800);
 
@@ -1391,6 +1571,25 @@ export default function Dashboard() {
 
     const label = ACTION_LABELS[mappedAction] || "Direct Command";
 
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        event: "ai_directive",
+        raw_text: command,
+        parsed_intent: {
+          action: mappedAction,
+          value: ""
+        }
+      }));
+    }
+
+    if (firebaseConfigured) {
+      appendCommandLog({
+        raw_text: command,
+        parsed_intent: mappedAction,
+        timestamp: Date.now()
+      });
+    }
+
     // Add to history log for visual dialogue bubbles
     const userMsg: LogMessage = {
       id: Date.now(),
@@ -1400,7 +1599,7 @@ export default function Dashboard() {
       time: new Date().toLocaleTimeString(),
       status: statusOk ? "ok" : "warn",
     };
-    setHistory(prev => [userMsg, ...prev].slice(0, 10));
+    setHistory(prev => [userMsg, ...prev].slice(0, 15));
     setIsProcessing(true);
 
     // Simulate system response after 800ms
@@ -1412,7 +1611,7 @@ export default function Dashboard() {
         time: new Date().toLocaleTimeString(),
         status: "ok",
       };
-      setHistory(prev => [sysMsg, ...prev].slice(0, 10));
+      setHistory(prev => [sysMsg, ...prev].slice(0, 15));
       setIsProcessing(false);
     }, 800);
 
@@ -1573,70 +1772,94 @@ export default function Dashboard() {
     console.log(`${LOG} Camera stream disconnected`);
   }, []);
 
-  // ── Settings Panel state
-  const [showSettings, setShowSettings] = useState(false);
-  const [roverConnectionStatus, setRoverConnectionStatus] = useState<RoverConnectionStatus>("disconnected");
-  const [ping, setPing] = useState<number | null>(null);
-  const [wsUrl, setWsUrl] = useState("");
+  // ── Settings Panel & WS Cleanup
 
-  // ── Network RTT Ping checker (Runs every 3 seconds to measure Firebase latency, fallback to simulation if not configured)
-  useEffect(() => {
-    let active = true;
-    let timerId: ReturnType<typeof setInterval> | null = null;
 
-    const performPingCheck = async () => {
-      if (!active) return;
-      const startTime = Date.now();
-      if (firebaseConfigured) {
-        try {
-          // Race the Firebase node set write with a 2.5s safety timeout
-          await Promise.race([
-            writePingRTT(startTime),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 2500))
-          ]);
-          if (active) {
-            const rtt = Date.now() - startTime;
-            setPing(rtt);
-          }
-        } catch (err) {
-          console.warn("[ARES-01] Firebase RTT check failed:", err);
-          if (active) {
-            setPing(null);
-          }
-        }
-      } else {
-        // Fallback simulation: random latency between 20-55ms
-        if (active) {
-          const simPing = Math.floor(18 + Math.random() * 32);
-          setPing(simPing);
-        }
-      }
-    };
-
-    // Run first check immediately, then every 3 seconds
-    performPingCheck();
-    timerId = setInterval(performPingCheck, 3000);
-
-    return () => {
-      active = false;
-      if (timerId) clearInterval(timerId);
-    };
+  const cleanupWs = useCallback(() => {
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = null;
+    }
+    if (wsRef.current) {
+      // Detach handlers to prevent onclose state updates during manual cleanup or unmount
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.onopen = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
   }, []);
+
+  // Cleanup active connections when component unmounts
+  useEffect(() => {
+    return () => cleanupWs();
+  }, [cleanupWs]);
 
   const handleConnectWs = useCallback(() => {
-    console.log(`${LOG} Connecting WebSocket → ${wsUrl || "<no url>"}`);
+    if (!wsUrl) return;
+    
+    console.log(`${LOG} Connecting Native WebSocket → ${wsUrl}`);
     setRoverConnectionStatus("connecting");
-    setTimeout(() => {
-      setRoverConnectionStatus("connected");
-      console.log(`${LOG} WebSocket connected`);
-    }, 2000);
-  }, [wsUrl]);
+    cleanupWs();
+
+    try {
+      wsRef.current = new WebSocket(wsUrl);
+
+      wsRef.current.onopen = () => {
+        setRoverConnectionStatus("connected");
+        console.log(`${LOG} Native WebSocket connected`);
+
+        // Initiate high-precision heartbeat loop every 3000ms
+        pingIntervalRef.current = setInterval(() => {
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            pingStartTimeRef.current = performance.now();
+            wsRef.current.send(JSON.stringify({ type: "ping" }));
+          }
+        }, 3000);
+      };
+
+      wsRef.current.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "pong") {
+            const rtt = Math.round(performance.now() - pingStartTimeRef.current);
+            setPing(rtt);
+          }
+        } catch (e) {
+          // Ignore non-JSON or other packets
+        }
+      };
+
+      wsRef.current.onclose = () => {
+        setRoverConnectionStatus("disconnected");
+        setPing(null);
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
+        wsRef.current = null;
+        console.log(`${LOG} Native WebSocket closed gracefully`);
+      };
+
+      wsRef.current.onerror = (err) => {
+        setRoverConnectionStatus("disconnected");
+        setPing(null);
+        console.warn(`${LOG} Native WebSocket error:`, err);
+      };
+    } catch (err) {
+      setRoverConnectionStatus("disconnected");
+      setPing(null);
+      console.warn(`${LOG} Native WebSocket initialization failed:`, err);
+    }
+  }, [wsUrl, cleanupWs]);
 
   const handleDisconnectWs = useCallback(() => {
+    cleanupWs();
     setRoverConnectionStatus("disconnected");
-    console.log(`${LOG} WebSocket disconnected`);
-  }, []);
-
+    setPing(null);
+    console.log(`${LOG} WebSocket disconnected manually`);
+  }, [cleanupWs]);
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen md:h-dvh w-screen bg-background text-foreground flex flex-col font-sans overflow-y-auto md:overflow-hidden justify-between">
@@ -1974,9 +2197,11 @@ export default function Dashboard() {
               <motion.div key="ai"
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
-                className="p-3 md:overflow-hidden md:h-full flex flex-col justify-center animate-none">
-                <div className="max-w-2xl w-full mx-auto flex flex-col gap-1.5 animate-none">
-                  <div className="text-center">
+                className="p-3 overflow-hidden h-full flex flex-col animate-none">
+                <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-6 flex-1 animate-none lg:pt-4">
+                  <div className="hidden lg:block"></div>
+                  <div className="flex flex-col gap-4 w-full max-w-[450px] mx-auto shrink-0">
+                    <div className="text-center">
                     <div className="text-xs sm:text-sm font-semibold">Autonomous Directive</div>
                     <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
                       Auto-detect language (English/Bengali) → Firebase <code className="font-mono text-[10px] bg-muted px-1 rounded">ares01/autonomous/action</code>
@@ -2009,7 +2234,8 @@ export default function Dashboard() {
                     ))}
                   </div>
 
-                  <div className="flex flex-col min-h-0">
+                  </div>
+                  <div className="flex flex-col min-h-0 flex-1 w-full lg:h-full bg-muted/5 lg:p-5 lg:rounded-2xl lg:border border-border/50 mt-4 lg:mt-0 shadow-sm relative">
                     <div className="flex justify-between items-center mb-1">
                       <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Command Log</div>
                       <div className="flex items-center justify-between h-4">
@@ -2030,7 +2256,7 @@ export default function Dashboard() {
                         <div className="absolute inset-y-0 bg-gradient-to-r from-blue-500 via-indigo-500 to-pink-500 w-1/2 rounded-full animate-progress-glow" />
                       )}
                     </div>
-                    <div className="space-y-1.5 max-h-[80px] overflow-y-auto pr-1">
+                    <div className="space-y-1.5 flex-1 overflow-y-auto max-h-[35vh] lg:max-h-[60vh] pr-1 pb-4">
                       <AnimatePresence initial={false}>
                         {history.map(cmd => {
                           const isUser = cmd.sender === "user";

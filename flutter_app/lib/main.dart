@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   runApp(const RoverApp());
@@ -13,7 +14,7 @@ class RoverApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Rover Control Center',
+      title: 'ARES-01',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: Colors.blueGrey[900],
@@ -35,12 +36,19 @@ class _RoverDashboardState extends State<RoverDashboard> {
   bool _isWebViewSupported = true;
 
   // TODO: Replace this placeholder with my actual Antigravity 2.0 web app URL or IP address.
-  final String _roverWebAppUrl = "http://192.168.0.24:8080"; 
+  final String _roverWebAppUrl = "http://192.168.0.24:5173"; 
 
   @override
   void initState() {
     super.initState();
     _checkPlatformCompatibility();
+    _requestPermissions();
+  }
+
+  Future<void> _requestPermissions() async {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      await [Permission.microphone, Permission.camera].request();
+    }
   }
 
   void _checkPlatformCompatibility() {
@@ -57,7 +65,7 @@ class _RoverDashboardState extends State<RoverDashboard> {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          'Rover Control Center',
+          'ARES-01',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.blueGrey[900],

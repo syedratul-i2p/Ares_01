@@ -15,7 +15,7 @@
  */
 
 import { initializeApp, FirebaseApp } from "firebase/app";
-import { getDatabase, ref, set, onValue, off, Database, DatabaseReference } from "firebase/database";
+import { getDatabase, ref, set, push, onValue, off, Database, DatabaseReference } from "firebase/database";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -282,3 +282,46 @@ export async function writePingRTT(timestamp: number): Promise<void> {
   await set(r, timestamp);
 }
 
+// ─── Cloud Infrastructure Sync ────────────────────────────────────────────────
+
+export function subscribeDbConnection(onConnect: (connected: boolean) => void): () => void {
+  const r = dbRef(".info/connected");
+  if (!r) return () => {};
+  onValue(r, (snap) => {
+    onConnect(snap.val() === true);
+  });
+  return () => off(r);
+}
+
+let missionStatusThrottle: ReturnType<typeof setTimeout> | null = null;
+let pendingMissionStatus: any = null;
+
+export async function syncMissionStatus(status: { mode: string, ping: number | null, battery: number | null }): Promise<void> {
+  const r = dbRef("ares01/mission_status");
+  if (!r) return;
+
+  pendingMissionStatus = status;
+  if (!missionStatusThrottle) {
+    missionStatusThrottle = setTimeout(async () => {
+      missionStatusThrottle = null;
+      if (pendingMissionStatus) {
+        try {
+          await set(r, pendingMissionStatus);
+        } catch (err) {
+          console.warn("[ARES-01] Mission status sync failed:", err);
+        }
+      }
+    }, 1000); // 1-second throttle
+  }
+}
+
+export async function appendCommandLog(log: { raw_text: string, parsed_intent: string, timestamp: number }): Promise<void> {
+  const r = dbRef("ares01/command_logs");
+  if (!r) return;
+  try {
+    const newLogRef = push(r);
+    await set(newLogRef, log);
+  } catch (err) {
+    console.warn("[ARES-01] Command log append failed:", err);
+  }
+}
