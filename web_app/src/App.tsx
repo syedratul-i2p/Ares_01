@@ -6,7 +6,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
-import { TitleBar } from "@/components/TitleBar";
 import { BootLoader } from "@/components/BootLoader";
 
 const queryClient = new QueryClient();
@@ -24,15 +23,14 @@ function App() {
   const [isBooting, setIsBooting] = useState(true);
 
   return (
-    <ThemeProvider defaultTheme="system" storageKey="ares-theme">
+    <ThemeProvider defaultTheme="light" storageKey="ares-theme">
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           {isBooting ? (
             <BootLoader onComplete={() => setIsBooting(false)} />
           ) : null}
-          <div className="flex flex-col h-screen w-screen overflow-hidden bg-transparent">
-            <TitleBar />
-            <div className="flex-1 overflow-auto mt-10">
+          <div className="flex flex-col h-screen w-screen overflow-hidden bg-background">
+            <div className="flex-1 overflow-hidden">
               <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
                 <Router />
               </WouterRouter>

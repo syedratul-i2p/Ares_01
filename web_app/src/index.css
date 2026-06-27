@@ -133,15 +133,15 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  --background: 230 23% 6%;
+  --background: 223 39% 7%;
   --foreground: 0 0% 98%;
-  --border: 230 30% 15%;
-  --card: 230 23% 6%;
+  --border: 223 30% 15%;
+  --card: 223 39% 7%;
   --card-foreground: 0 0% 98%;
-  --card-border: 230 30% 15%;
-  --sidebar: 230 23% 6%;
+  --card-border: 223 30% 15%;
+  --sidebar: 223 39% 7%;
   --sidebar-foreground: 240 4.8% 95.9%;
-  --sidebar-border: 230 30% 15%;
+  --sidebar-border: 223 30% 15%;
   --sidebar-primary: 243 75% 59%;
   --sidebar-primary-foreground: 0 0% 100%;
   --sidebar-accent: 223 30% 15%;
@@ -191,9 +191,20 @@
   * {
     @apply border-border;
   }
-  body {
-    @apply font-sans antialiased bg-transparent text-foreground;
+  html, body, #root {
+    overflow: hidden !important;
+    height: 100vh !important;
+    width: 100vw !important;
+    margin: 0;
+    padding: 0;
   }
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+::-webkit-scrollbar {
+  display: none !important;
 }
 
 /* ── Joint Range Slider (Premium Modern) ─────────────────────────────────────────────────── */

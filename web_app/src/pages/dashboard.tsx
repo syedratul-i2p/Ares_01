@@ -4,8 +4,9 @@ import {
   ArrowLeft, ArrowRight, Square, Mic, Send, CheckCircle2, Cpu,
   Thermometer, Zap, Radio, Ruler, Wifi, WifiOff, Loader2,
   Activity, X, RotateCcw, Gamepad2, Bot, AlertTriangle, Database, Camera,
-  Monitor, Film
+  Monitor, Film, Minus
 } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTheme } from "@/components/theme-provider";
 import { useInterval } from "@/hooks/use-interval";
 import { Button } from "@/components/ui/button";
@@ -106,8 +107,8 @@ const Header = React.memo(function Header({
   ping
 }: HeaderProps) {
   return (
-    <header className="h-12 border border-border/60 bg-white dark:bg-white/[0.03] backdrop-blur-xl flex items-center justify-between px-5 shrink-0 z-20 shadow-sm dark:shadow-none">
-      <div className="flex items-center gap-3">
+    <header data-tauri-drag-region className="h-16 shrink-0 flex items-center justify-between px-5 border-b border-border/60 bg-white dark:bg-white/[0.03] backdrop-blur-xl z-20 shadow-sm dark:shadow-none select-none">
+      <div className="flex items-center gap-3 pointer-events-none">
         <h1 className="font-bold text-base tracking-tight text-gray-900 dark:text-white">
           <img src="/logo.png" alt="ARES-01 Logo" className="h-7 w-auto object-contain mr-3 inline-block transform-gpu" />
           ARES-01
@@ -146,7 +147,7 @@ const Header = React.memo(function Header({
           </Badge>
         )}
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 pointer-events-auto">
         <Button variant={showSettings ? "secondary" : "ghost"} size="icon" className="h-8 w-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
           onClick={() => setShowSettings(s => !s)} data-testid="button-settings">
           {showSettings ? <X className="w-3.5 h-3.5" /> : <Settings className="w-3.5 h-3.5" />}
@@ -155,6 +156,17 @@ const Header = React.memo(function Header({
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")} data-testid="button-theme-toggle">
           {theme === "dark" ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
         </Button>
+        <div data-tauri-drag-region="" className="flex items-center gap-1 ml-2 border-l border-border/30 pl-2 pointer-events-auto relative z-50">
+          <div onClick={async () => await getCurrentWindow().minimize()} className="p-2 rounded hover:bg-black/10 dark:hover:bg-white/20 transition-all duration-75 ease-in-out hover:translate-y-[2px] active:scale-85 active:brightness-90 cursor-pointer pointer-events-auto z-50">
+            <Minus className="w-3.5 h-3.5 pointer-events-none" />
+          </div>
+          <div onClick={async () => await getCurrentWindow().toggleMaximize()} className="p-2 rounded hover:bg-black/10 dark:hover:bg-white/20 transition-all duration-75 ease-in-out hover:scale-110 active:scale-85 active:brightness-90 cursor-pointer pointer-events-auto z-50">
+            <Square className="w-3.5 h-3.5 pointer-events-none" />
+          </div>
+          <div onClick={async () => await getCurrentWindow().close()} className="p-2 rounded hover:bg-red-500 hover:text-white transition-all duration-75 ease-in-out active:scale-85 active:brightness-90 hover:shadow-[0_0_15px_rgba(239,68,68,0.8)] cursor-pointer pointer-events-auto z-50">
+            <X className="w-3.5 h-3.5 pointer-events-none" />
+          </div>
+        </div>
       </div>
     </header>
   );
@@ -511,7 +523,7 @@ const CameraView = React.memo(function CameraView({
           id="rover-video-stream"
           src={streamSrc}
           alt="ARES-01 live feed"
-          className="w-full h-full object-cover transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
+          className="max-h-full object-contain aspect-video transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
           onError={() => {
             setStreamError(true);
             console.warn(`[ARES-01] Camera stream error at ${streamSrc}`);
@@ -592,10 +604,10 @@ const DPad = React.memo(function DPad({
 }: DPadProps) {
   const getButtonClass = (dir: Direction) => {
     const isActive = activeDirection === dir;
-    return `w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ${
+    return `w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
       isActive
         ? "scale-90 bg-primary border-2 border-primary text-primary-foreground shadow-inner shadow-black/30 ring-4 ring-primary/30 rounded-xl neon-glow-cyan"
-        : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-primary hover:bg-slate-50 text-slate-800 rounded-xl dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:border-primary/50 dark:hover:text-primary"
+        : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-primary hover:bg-slate-50 hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] text-slate-800 rounded-xl dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:border-primary/50 dark:hover:border-white/30 dark:hover:text-primary"
     }`;
   };
 
@@ -605,7 +617,7 @@ const DPad = React.memo(function DPad({
       <div className="flex flex-col items-center gap-2 select-none mb-1">
         <button
           className={getButtonClass("forward")}
-          onMouseDown={() => onPress("forward")} onMouseUp={onRelease} onMouseLeave={onRelease}
+          onMouseDown={() => { onPress("forward"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
           onTouchStart={e => { e.preventDefault(); onPress("forward"); }} onTouchEnd={onRelease}
           data-testid="btn-move-fwd">
           <ArrowUp className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -613,23 +625,23 @@ const DPad = React.memo(function DPad({
         <div className="flex gap-2">
           <button
             className={getButtonClass("left")}
-            onMouseDown={() => onPress("left")} onMouseUp={onRelease} onMouseLeave={onRelease}
+            onMouseDown={() => { onPress("left"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
             onTouchStart={e => { e.preventDefault(); onPress("left"); }} onTouchEnd={onRelease}
             data-testid="btn-move-left">
             <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
           <button
-            className={`w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ${
+            className={`w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
               activeDirection === "stop"
                 ? "scale-90 bg-destructive border-2 border-destructive text-destructive-foreground shadow-inner shadow-black/30 ring-4 ring-destructive/30 rounded-xl neon-glow-violet"
-                : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-destructive hover:bg-slate-50 text-destructive rounded-xl dark:border-white/10 dark:bg-transparent dark:text-destructive dark:hover:border-destructive/50"
+                : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-destructive hover:bg-slate-50 hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] text-destructive rounded-xl dark:border-white/10 dark:bg-transparent dark:hover:border-white/30 dark:text-destructive dark:hover:border-destructive/50"
             }`}
-            onClick={onStop} data-testid="btn-move-stop">
+            onClick={() => { onStop(); }} data-testid="btn-move-stop">
             <Square className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
           </button>
           <button
             className={getButtonClass("right")}
-            onMouseDown={() => onPress("right")} onMouseUp={onRelease} onMouseLeave={onRelease}
+            onMouseDown={() => { onPress("right"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
             onTouchStart={e => { e.preventDefault(); onPress("right"); }} onTouchEnd={onRelease}
             data-testid="btn-move-right">
             <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -637,7 +649,7 @@ const DPad = React.memo(function DPad({
         </div>
         <button
           className={getButtonClass("backward")}
-          onMouseDown={() => onPress("backward")} onMouseUp={onRelease} onMouseLeave={onRelease}
+          onMouseDown={() => { onPress("backward"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
           onTouchStart={e => { e.preventDefault(); onPress("backward"); }} onTouchEnd={onRelease}
           data-testid="btn-move-back">
           <ArrowDown className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -853,8 +865,8 @@ const ArmControls = React.memo(function ArmControls({
         <div className="flex items-center gap-2">
           <div className="flex rounded-md overflow-hidden border border-border text-[10px] font-mono">
             {([1, 5, 15] as const).map(s => (
-              <button key={s} onClick={() => setStepSize(s)}
-                className={`px-2 py-0.5 transition-colors ${stepSize === s ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+              <button key={s} onClick={() => { setStepSize(s); }}
+                className={`px-2 py-0.5 transition-all duration-300 ease-out active:scale-95 ${stepSize === s ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted hover:scale-105 hover:text-foreground"}`}
                 data-testid={`btn-step-${s}`}>{s}°</button>
             ))}
           </div>
@@ -869,11 +881,11 @@ const ArmControls = React.memo(function ArmControls({
         {ARM_PRESETS.map(p => {
           const isActive = joints.base === p.joints.base && joints.shoulder === p.joints.shoulder && joints.elbow === p.joints.elbow && joints.wrist === p.joints.wrist && joints.gripper === p.joints.gripper;
           return (
-            <button key={p.name} onClick={() => applyPreset(p)}
-              className={`text-[11px] py-1.5 px-1 rounded-md border transition-all font-semibold cursor-pointer active:scale-95 shadow-sm ${
+            <button key={p.name} onClick={() => { applyPreset(p); }}
+              className={`text-[11px] py-1.5 px-1 rounded-md border transition-all duration-300 ease-out font-semibold cursor-pointer active:scale-95 shadow-sm ${
                 isActive 
-                  ? "bg-primary text-primary-foreground border-primary shadow-[0_0_8px_rgba(var(--primary),0.5)]" 
-                  : "bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/20 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 hover:border-primary dark:hover:border-primary hover:text-primary dark:hover:text-primary"
+                  ? "bg-primary text-primary-foreground border-primary shadow-[0_0_15px_rgba(var(--primary),0.5)] scale-105" 
+                  : "bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/20 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 hover:border-primary dark:hover:border-primary hover:text-primary dark:hover:text-primary hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)]"
               }`}
               data-testid={`btn-preset-${p.name.toLowerCase()}`}>{p.name}</button>
           );
@@ -903,8 +915,8 @@ const ArmControls = React.memo(function ArmControls({
                 
                 {/* Control Row: Dec button, Slider, Inc button, Desktop Value */}
                 <div className="arm-slider-control-row flex items-center gap-2 flex-1 w-full relative">
-                  <button onClick={() => updateJoint(key, -stepSize)}
-                    className="h-6 w-6 md:h-5 md:w-5 shrink-0 rounded border border-white/10 flex items-center justify-center text-xs md:text-[10px] bg-white/5 hover:bg-white/10 hover:border-white/20 active:scale-90 transition-all font-semibold cursor-pointer text-foreground select-none"
+                  <button onClick={() => { updateJoint(key, -stepSize); }}
+                    className="h-6 w-6 md:h-5 md:w-5 shrink-0 rounded border border-white/10 flex items-center justify-center text-xs md:text-[10px] bg-white/5 hover:bg-white/10 hover:border-white/20 hover:scale-105 hover:shadow-[0_0_10px_rgba(255,255,255,0.1)] active:scale-90 transition-all duration-300 ease-out font-semibold cursor-pointer text-foreground select-none"
                     data-testid={`btn-arm-${key}-dec`}>−</button>
                   
                   <div className="relative flex-1 group flex items-center h-full">
@@ -923,8 +935,8 @@ const ArmControls = React.memo(function ArmControls({
                       data-testid={`slider-arm-${key}`} />
                   </div>
 
-                  <button onClick={() => updateJoint(key, stepSize)}
-                    className="h-6 w-6 md:h-5 md:w-5 shrink-0 rounded border border-white/10 flex items-center justify-center text-xs md:text-[10px] bg-white/5 hover:bg-white/10 hover:border-white/20 active:scale-90 transition-all font-semibold cursor-pointer text-foreground select-none"
+                  <button onClick={() => { updateJoint(key, stepSize); }}
+                    className="h-6 w-6 md:h-5 md:w-5 shrink-0 rounded border border-white/10 flex items-center justify-center text-xs md:text-[10px] bg-white/5 hover:bg-white/10 hover:border-white/20 hover:scale-105 hover:shadow-[0_0_10px_rgba(255,255,255,0.1)] active:scale-90 transition-all duration-300 ease-out font-semibold cursor-pointer text-foreground select-none"
                     data-testid={`btn-arm-${key}-inc`}>+</button>
                   
                   {/* Desktop value editor / viewer */}
@@ -1862,7 +1874,7 @@ export default function Dashboard() {
   }, [cleanupWs]);
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen md:h-dvh w-screen bg-background text-foreground flex flex-col font-sans overflow-y-auto md:overflow-hidden justify-between">
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-white dark:bg-[#0B0F19]">
       
       {/* Header */}
       <Header
@@ -1900,7 +1912,7 @@ export default function Dashboard() {
 
       {/* Camera View Section (Top - Max 48dvh Viewport Height Budget) */}
       {/* Camera View Section (Top - Max 48dvh Viewport Height Budget) */}
-      <div className="w-full gemini-bg flex justify-center items-center shrink-0 border-b border-border/40 relative overflow-hidden py-1 sm:py-1.5 z-10">
+      <div className="flex-1 min-h-0 relative bg-black/90 w-full z-10">
         <style>{`
           @keyframes geminiGradient {
             0% { background-position: 0% 50%; }
@@ -2108,8 +2120,8 @@ export default function Dashboard() {
         <div className="absolute -bottom-16 -right-16 w-80 h-80 rounded-full bg-gradient-to-br from-blue-500/20 via-teal-500/20 to-indigo-500/20 blur-[90px] pointer-events-none float-blob-2" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] h-[80%] rounded-full bg-gradient-to-tr from-purple-600/5 via-blue-600/5 to-teal-500/5 blur-[100px] pointer-events-none animate-pulse" style={{ animationDuration: "8s" }} />
 
-        {/* Central Widescreen Camera Frame */}
-        <div className="desktop-camera-feed w-full max-w-none md:max-w-[94vw] aspect-video md:aspect-auto max-h-[50vh] md:max-h-[48dvh] h-auto md:h-[48dvh] relative overflow-hidden z-10 shadow-2xl border border-white/5 rounded-lg">
+        {/* Central Widescreen Camera Frame (Absolute Inset Hack) */}
+        <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
           <CameraView
             streamSrc={streamSrc}
             streamError={streamError}
@@ -2127,15 +2139,15 @@ export default function Dashboard() {
       </div>
 
       {/* Interactive Control Section (Middle - Max 42dvh Viewport Height Budget) */}
-      <div className="flex-1 flex flex-col min-h-0 md:max-h-[42dvh] md:overflow-hidden bg-background z-10">
+      <div className="h-[380px] shrink-0 pb-6 pt-2 overflow-y-auto overflow-x-hidden flex flex-col bg-background z-10">
         
         {/* 2. MODE SELECTOR TABS */}
         <div className="shrink-0 px-4 pt-4 md:pt-2.5 pb-2 bg-transparent z-10">
           <div className="relative flex rounded-xl bg-muted/80 p-1 gap-0.5 max-w-xl mx-auto border border-border/50">
             {CONTROL_TABS.map(tab => (
-              <button key={tab.id} onClick={() => setControlMode(tab.id)}
-                className={`relative flex flex-1 items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg z-10 transition-colors duration-150 select-none ${
-                  controlMode === tab.id ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+              <button key={tab.id} onClick={() => { setControlMode(tab.id); }}
+                className={`relative flex flex-1 items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg z-10 transition-all duration-300 ease-out active:scale-95 select-none ${
+                  controlMode === tab.id ? "text-foreground shadow-[0_0_10px_rgba(255,255,255,0.05)] scale-[1.02]" : "text-muted-foreground hover:text-foreground hover:scale-105"
                 }`}
                 data-testid={`tab-${tab.id}`}>
                 {controlMode === tab.id && (

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { playBootChime } from "@/lib/audio";
 
 interface BootLoaderProps {
   onComplete: () => void;
