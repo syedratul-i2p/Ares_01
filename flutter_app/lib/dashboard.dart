@@ -126,30 +126,7 @@ class _DualBrainDashboardState extends State<DualBrainDashboard> {
       });
     }
   }
-    
-    // 1. Listen to RTDB Telemetry
-    _firebaseService.telemetryStream?.listen((data) {
-      if (mounted) {
-        setState(() {
-          _batteryPercentage = data['battery_percentage'];
-          _obstacleDistance = data['obstacle_distance'];
-        });
-      }
-    });
 
-    // 2. Start polling for Live Frame from Firebase Storage
-    // Since Storage doesn't have WebSockets like RTDB, we poll the download URL.
-    // In production, utilizing a direct WebRTC or HTTP stream is faster, 
-    // but this satisfies the Mode A architecture constraint.
-    _frameTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) async {
-      final url = await _firebaseService.getLiveFrameUrl();
-      if (url.isNotEmpty && url != _liveFrameUrl && mounted) {
-        setState(() {
-          _liveFrameUrl = url;
-        });
-      }
-    });
-  }
 
   @override
   void dispose() {
