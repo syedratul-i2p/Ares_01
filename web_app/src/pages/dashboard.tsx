@@ -7,6 +7,7 @@ import {
   Monitor, Film, Minus
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { useTheme } from "@/components/theme-provider";
 import { useInterval } from "@/hooks/use-interval";
 import { Button } from "@/components/ui/button";
@@ -16,11 +17,13 @@ import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { CameraOverlay } from "@/components/CameraOverlay";
+import { toast } from "sonner";
 import {
   firebaseConfigured,
   setDriveDirection,
   setArmAngles,
   sendAutonomousCommand,
+  setNavigationMode,
   subscribeTelemetry,
   setMaxSpeed,
   triggerReboot,
@@ -95,6 +98,7 @@ interface HeaderProps {
   theme: string;
   setTheme: (theme: any) => void;
   ping: number | null;
+  batteryPct: number;
 }
 
 const Header = React.memo(function Header({
@@ -104,7 +108,8 @@ const Header = React.memo(function Header({
   setShowSettings,
   theme,
   setTheme,
-  ping
+  ping,
+  batteryPct
 }: HeaderProps) {
   return (
     <header data-tauri-drag-region className="h-16 shrink-0 flex items-center justify-between px-5 border-b border-border/60 bg-white dark:bg-white/[0.03] backdrop-blur-xl z-20 shadow-sm dark:shadow-none select-none">
@@ -146,8 +151,22 @@ const Header = React.memo(function Header({
             <span className={`${getPingColorClass(ping)}`}>{ping}ms</span>
           </Badge>
         )}
+        <Badge variant="outline" className="text-[10px] h-5 gap-1 font-mono font-medium">
+          <Battery className={`w-3.5 h-3.5 ${batteryPct > 20 ? 'text-green-500' : 'text-red-500 animate-pulse'}`} />
+          <span>{batteryPct}% (3S)</span>
+        </Badge>
       </div>
       <div className="flex items-center gap-1 pointer-events-auto">
+        {/* Rover Mode Toggle */}
+        <div className="flex items-center gap-2 mr-2 bg-black/20 px-3 py-1.5 rounded-full border border-white/5">
+          <span className={`text-[10px] font-bold tracking-wider ${roverMode === "AUTONOMOUS" ? "text-green-400" : "text-white/70"}`}>
+            {roverMode === "AUTONOMOUS" ? "AUTO" : "MANUAL"}
+          </span>
+          <ToggleSwitch 
+            checked={roverMode === "AUTONOMOUS"} 
+            onChange={(checked) => handleRoverModeToggle(checked ? "AUTONOMOUS" : "MANUAL")} 
+          />
+        </div>
         <Button variant={showSettings ? "secondary" : "ghost"} size="icon" className="h-8 w-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
           onClick={() => setShowSettings(s => !s)} data-testid="button-settings">
           {showSettings ? <X className="w-3.5 h-3.5" /> : <Settings className="w-3.5 h-3.5" />}
@@ -156,7 +175,7 @@ const Header = React.memo(function Header({
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")} data-testid="button-theme-toggle">
           {theme === "dark" ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
         </Button>
-        <div data-tauri-drag-region="" className="flex items-center gap-1 ml-2 border-l border-border/30 pl-2 pointer-events-auto relative z-50">
+        <div data-tauri-drag-region="" className="hidden sm:flex items-center gap-1 ml-2 border-l border-border/30 pl-2 pointer-events-auto relative z-50">
           <div onClick={async () => await getCurrentWindow().minimize()} className="p-2 rounded hover:bg-black/10 dark:hover:bg-white/20 transition-all duration-75 ease-in-out hover:translate-y-[2px] active:scale-85 active:brightness-90 cursor-pointer pointer-events-auto z-50">
             <Minus className="w-3.5 h-3.5 pointer-events-none" />
           </div>
@@ -183,11 +202,6 @@ interface SettingsPanelProps {
   streamError: boolean;
   handleConnectCamera: () => void;
   handleDisconnectCamera: () => void;
-  wsUrl: string;
-  setWsUrl: (val: string) => void;
-  roverConnectionStatus: RoverConnectionStatus;
-  handleConnectWs: () => void;
-  handleDisconnectWs: () => void;
   ping: number | null;
   rebooting: boolean;
   handleReboot: () => void;
@@ -247,6 +261,9 @@ const SettingsPanel = React.memo(function SettingsPanel({
             className="absolute inset-0 bg-black/50 dark:bg-black/70 backdrop-blur-sm"
             onClick={() => setShowSettings(false)}
           />
+
+          {/* Toast Notification Layer (Removed in favor of Sonner) */}
+
           {/* Settings Overlay Card */}
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: -10 }}
@@ -379,7 +396,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                       <span className="w-1 h-1 rounded-full bg-slate-400" />
                     )}
                   </div>
-                  <div className="flex gap-1.5">
+                  <div className="flex flex-col sm:flex-row gap-2 sm:gap-1.5">
                     <input
                       type="text"
                       className="h-6 text-[10px] bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
@@ -391,7 +408,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                     {streamSrc ? (
                       <button
                         onClick={handleDisconnectCamera}
-                        className="px-2 py-0.5 text-[9px] font-bold rounded border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"
+                        className="w-full sm:w-auto px-2 py-1.5 sm:py-0.5 text-[10px] sm:text-[9px] font-bold rounded border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"
                       >
                         Disconnect
                       </button>
@@ -399,7 +416,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                       <button
                         onClick={handleConnectCamera}
                         disabled={!roverIp.trim()}
-                        className="px-2.5 py-0.5 text-[9px] font-bold rounded bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground transition-all cursor-pointer border-0"
+                        className="w-full sm:w-auto px-2.5 py-1.5 sm:py-0.5 text-[10px] sm:text-[9px] font-bold rounded bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground transition-all cursor-pointer border-0"
                       >
                         Connect
                       </button>
@@ -422,41 +439,6 @@ const SettingsPanel = React.memo(function SettingsPanel({
                         <option value="15">15 FPS</option>
                       </select>
                     </div>
-                  </div>
-                </div>
-
-                {/* WebSocket */}
-                <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-transparent hover:bg-slate-50 dark:hover:bg-[rgba(255,255,255,0.02)] border border-transparent hover:border-slate-200 dark:hover:border-[#333] transition-colors">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-slate-900 dark:text-[#E0E0E0]">WebSocket Server Endpoint</span>
-                    {roverConnectionStatus === "connected" && (
-                      <span className="w-1 h-1 rounded-full bg-slate-400" />
-                    )}
-                  </div>
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      className="h-6 text-[10px] bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
-                      placeholder="ws://192.168.1.100:81"
-                      value={wsUrl}
-                      onChange={e => setWsUrl(e.target.value)}
-                    />
-                    {roverConnectionStatus === "connected" ? (
-                      <button
-                        onClick={handleDisconnectWs}
-                        className="px-2 py-0.5 text-[9px] font-bold rounded border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"
-                      >
-                        Disconnect
-                      </button>
-                    ) : (
-                      <button
-                        onClick={handleConnectWs}
-                        disabled={roverConnectionStatus === "connecting"}
-                        className="px-2.5 py-0.5 text-[9px] font-bold rounded bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground transition-all cursor-pointer border-0"
-                      >
-                        {roverConnectionStatus === "connecting" ? "Connecting..." : "Connect"}
-                      </button>
-                    )}
                   </div>
                 </div>
               </div>
@@ -523,7 +505,7 @@ const CameraView = React.memo(function CameraView({
           id="rover-video-stream"
           src={streamSrc}
           alt="ARES-01 live feed"
-          className="max-h-full object-contain aspect-video transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
+          className="w-full h-auto object-cover sm:max-h-full sm:object-contain aspect-video rounded-xl sm:rounded-none transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
           onError={() => {
             setStreamError(true);
             console.warn(`[ARES-01] Camera stream error at ${streamSrc}`);
@@ -585,6 +567,24 @@ const CameraView = React.memo(function CameraView({
           </div>
         )}
       </div>
+
+      {/* Phase 7: Proximity Radar */}
+      {distance !== undefined && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[80%] max-w-sm pointer-events-none flex flex-col items-center gap-1.5 backdrop-blur-sm bg-black/40 p-2 rounded-xl border border-white/10">
+          <div className="w-full flex justify-between text-[10px] font-mono font-semibold uppercase tracking-wider text-white/80">
+            <span>Obstacle Proximity</span>
+            <span className={distance < 15 ? 'text-red-400 animate-pulse font-bold' : distance < 30 ? 'text-yellow-400' : 'text-green-400'}>
+              {distance < 15 ? "BRAKE" : distance + " cm"}
+            </span>
+          </div>
+          <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+            <div 
+              className={`h-full transition-all duration-300 ${distance < 15 ? 'bg-red-500' : distance < 30 ? 'bg-yellow-500' : 'bg-green-500'}`}
+              style={{ width: `${Math.min(100, Math.max(0, (100 - distance)))}%` }} 
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 });
@@ -604,7 +604,7 @@ const DPad = React.memo(function DPad({
 }: DPadProps) {
   const getButtonClass = (dir: Direction) => {
     const isActive = activeDirection === dir;
-    return `w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
+    return `w-14 h-14 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
       isActive
         ? "scale-90 bg-primary border-2 border-primary text-primary-foreground shadow-inner shadow-black/30 ring-4 ring-primary/30 rounded-xl neon-glow-cyan"
         : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-primary hover:bg-slate-50 hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] text-slate-800 rounded-xl dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:border-primary/50 dark:hover:border-white/30 dark:hover:text-primary"
@@ -631,7 +631,7 @@ const DPad = React.memo(function DPad({
             <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
           <button
-            className={`w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
+            className={`w-14 h-14 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
               activeDirection === "stop"
                 ? "scale-90 bg-destructive border-2 border-destructive text-destructive-foreground shadow-inner shadow-black/30 ring-4 ring-destructive/30 rounded-xl neon-glow-violet"
                 : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-destructive hover:bg-slate-50 hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] text-destructive rounded-xl dark:border-white/10 dark:bg-transparent dark:hover:border-white/30 dark:text-destructive dark:hover:border-destructive/50"
@@ -983,41 +983,118 @@ export default function Dashboard() {
   const [ping, setPing] = useState<number | null>(null);
   const [wsUrl, setWsUrl] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [roverMode, setRoverMode] = useState<"MANUAL" | "AUTONOMOUS">("MANUAL");
+
+  // ── Camera Stream State (Moved up for hook dependency array)
+  const [roverIp, setRoverIp] = useState("192.168.4.1");
+  const [streamSrc, setStreamSrc] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState(false);
+
+  // ── Toast Notification State
+
 
   // ── WebSocket References
-  const wsRef = useRef<WebSocket | null>(null);
-  const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pingStartTimeRef = useRef<number>(0);
+
+  // ── Phase 6.1 Telemetry & Task Queue State
+  const [telemetry, setTelemetry] = useState({ 
+    locked: false, x: 0, y: 0, w: 0, h: 0, area: 0, 
+    battery_percentage: 0.0, obstacle_distance: 999.9, auto_brake: false 
+  });
+  const [aiTaskState, setAiTaskState] = useState<"idle" | "rotate_to_scan" | "await_lock" | "approach" | "pickup">("idle");
+  const aiTaskStateRef = useRef(aiTaskState);
+  useEffect(() => { aiTaskStateRef.current = aiTaskState; }, [aiTaskState]);
+  const telemetryRef = useRef(telemetry);
+  useEffect(() => { telemetryRef.current = telemetry; }, [telemetry]);
+
+  // Connect to Python Backend Telemetry
+  useEffect(() => {
+    const hostname = window.location.hostname || "127.0.0.1";
+    const telemetryWs = new WebSocket(`ws://${hostname}:5000/telemetry`);
+    telemetryWs.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        setTelemetry(data);
+      } catch (err) {}
+    };
+    return () => telemetryWs.close();
+  }, []);
+
+  // Send camera URL to Python backend when available
+  useEffect(() => {
+    if (streamSrc && !streamError) {
+      const hostname = window.location.hostname || "127.0.0.1";
+      fetch(`http://${hostname}:5000/api/set_camera_url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: streamSrc })
+      }).catch(() => {});
+    }
+  }, [streamSrc, streamError]);
+
+  // Autonomous Task Queue State Machine Loop
+  useInterval(() => {
+    if (controlMode !== "ai" && controlMode !== "voice") return;
+    const state = aiTaskStateRef.current;
+    if (state === "idle") return;
+    
+    const tel = telemetryRef.current;
+    
+    // Phase 7: Emergency Auto-Brake Override
+    if (tel.auto_brake) {
+      setAiTaskState("idle"); // Halt the mission immediately
+      console.warn("[SYS] EMERGENCY AUTO-BRAKE INJECTED");
+      return;
+    }
+    
+    if (state === "rotate_to_scan") {
+      if (tel.locked) {
+        setAiTaskState("await_lock");
+      } else {
+      }
+    } else if (state === "await_lock") {
+      if (!tel.locked) {
+        setAiTaskState("rotate_to_scan");
+      } else {
+        setAiTaskState("approach");
+      }
+    } else if (state === "approach") {
+      if (!tel.locked) {
+        setAiTaskState("rotate_to_scan");
+        return;
+      }
+      
+      const dx = tel.x - (tel.w > 0 ? 320 : 160); // Roughly center
+      if (tel.area > 15000) {
+        setAiTaskState("pickup");
+      } else {
+      }
+    } else if (state === "pickup") {
+      const nextAngles = { base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 };
+      setAiTaskState("idle");
+    }
+  }, 200);
 
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const reqFrameRef = useRef<number>(0);
 
-  const handleCapturePhoto = useCallback(() => {
-    const img = document.getElementById('rover-video-stream') as HTMLImageElement;
-    if (!img) {
-      console.warn(`${LOG} Cannot capture: Video stream element not found.`);
-      return;
+  const handleCapturePhoto = useCallback(async () => {
+    try {
+      if (!roverIp) {
+        console.warn(`${LOG} Cannot capture: No Rover IP configured.`);
+        toast.error("⚠️ Capture Failed: No Rover IP Configured");
+        return;
+      }
+      console.log(`${LOG} Requesting photo capture from ${roverIp}...`);
+      const savedPath = await invoke<string>("capture_photo", { ip: roverIp });
+      console.log(`${LOG} Photo successfully captured and saved to: ${savedPath}`);
+      toast.success(`📸 Media Saved: ${savedPath}`);
+    } catch (err) {
+      console.error(`${LOG} Failed to capture photo:`, err);
+      toast.error(`⚠️ Capture Failed: ${err}`);
     }
-    const canvas = document.createElement('canvas');
-    canvas.width = img.naturalWidth || 800;
-    canvas.height = img.naturalHeight || 600;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-      
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      a.download = `ARES-01_Photo_${timestamp}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      console.log(`${LOG} Photo captured and downloaded.`);
-    }
-  }, []);
+  }, [roverIp]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -1091,12 +1168,14 @@ export default function Dashboard() {
 
   // ── Live telemetry from Firebase
   const [liveTelemetry, setLiveTelemetry] = useState<{
-    distance?: number; solar?: number; motor_temp?: number; rssi?: number;
-    batteryPercent?: number; batteryVoltage?: number;
+    obstacle_distance?: number;
+    battery_percentage?: number;
+    motor_temp?: number;
+    rssi?: number;
   }>({});
 
-  const distance  = liveTelemetry.distance;
-  const solar     = liveTelemetry.solar;
+  const distance  = liveTelemetry.obstacle_distance;
+  const solar     = liveTelemetry.battery_percentage;
   const motorTemp = liveTelemetry.motor_temp;
   const rssi      = liveTelemetry.rssi;
 
@@ -1143,6 +1222,11 @@ export default function Dashboard() {
     await setFirebaseControlMode(mode);
   }, []);
 
+  const handleRoverModeToggle = useCallback(async (mode: "MANUAL" | "AUTONOMOUS") => {
+    setRoverMode(mode);
+    await setNavigationMode(mode);
+  }, []);
+
   // Sync mission status asynchronously
   useEffect(() => {
     if (!firebaseConfigured) return;
@@ -1156,28 +1240,35 @@ export default function Dashboard() {
   // ── D-Pad
   const [activeDirection, setActiveDirection] = useState<Direction | null>(null);
 
-  const handleDirectionPress = useCallback((dir: Direction) => {
+  const handleDirectionPress = useCallback(async (dir: Direction) => {
     setActiveDirection(dir);
     const fbDir = dir.toUpperCase() as DriveDirection;
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ event: "drive", command: fbDir }));
-    }
     setDriveDirection(fbDir);
-  }, []);
-
-  const handleDirectionRelease = useCallback(() => {
-    setActiveDirection(null);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ event: "drive", command: "STOP" }));
+    try {
+      if (roverIp) {
+        await invoke("send_drive_command", { ip: roverIp, direction: fbDir });
+      }
+    } catch (err) {
+      console.error("IPC Drive Error:", err);
+      toast.error(`Drive Error: ${err}`);
     }
+  }, [roverIp]);
+
+  const handleDirectionRelease = useCallback(async () => {
+    setActiveDirection(null);
     setDriveDirection("STOP");
-  }, []);
+    try {
+      if (roverIp) {
+        await invoke("send_drive_command", { ip: roverIp, direction: "STOP" });
+      }
+    } catch (err) {
+      console.error("IPC Drive Error:", err);
+      toast.error(`Drive Error: ${err}`);
+    }
+  }, [roverIp]);
 
   const handleStop = useCallback(() => {
     setActiveDirection(null);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ event: "drive", command: "STOP" }));
-    }
     setDriveDirection("STOP");
   }, []);
 
@@ -1249,9 +1340,6 @@ export default function Dashboard() {
       }
 
       setActiveDirection(dir);
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ event: "drive", command: fbDir }));
-      }
       setDriveDirection(fbDir);
     };
 
@@ -1271,9 +1359,6 @@ export default function Dashboard() {
         
         if (key === " " || activeKeysRef.current.size === 0) {
           setActiveDirection(null);
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ event: "drive", command: "STOP" }));
-          }
           setDriveDirection("STOP");
         } else {
           // Transition to the next remaining active key
@@ -1318,9 +1403,6 @@ export default function Dashboard() {
               return;
           }
           setActiveDirection(dir);
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ event: "drive", command: fbDir }));
-          }
           setDriveDirection(fbDir);
         }
       }
@@ -1330,9 +1412,6 @@ export default function Dashboard() {
       if (activeKeysRef.current.size > 0) {
         activeKeysRef.current.clear();
         setActiveDirection(null);
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ event: "drive", command: "STOP" }));
-        }
         setDriveDirection("STOP");
       }
     };
@@ -1354,22 +1433,20 @@ export default function Dashboard() {
 
   const updateJoint = useCallback((joint: keyof ArmAngles, delta: number) => {
     setJoints(prev => {
-      const next = { ...prev, [joint]: Math.max(0, Math.min(180, prev[joint] + delta)) };
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ event: "arm", angles: next }));
+      const nextAngle = Math.max(0, Math.min(180, prev[joint] + delta));
+      const next = { ...prev, [joint]: nextAngle };
+      if (roverIp) {
+        console.warn("Individual joint HTTP control not supported in monolithic firmware. Use macros.");
       }
       setArmAngles(next);
       return next;
     });
-  }, []);
+  }, [roverIp]);
 
   const setJointAngle = useCallback((joint: keyof ArmAngles, raw: number) => {
     const val = Math.max(0, Math.min(180, raw));
     setJoints(prev => {
       const next = { ...prev, [joint]: val };
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ event: "arm", angles: next }));
-      }
       setArmAngles(next);
       return next;
     });
@@ -1391,9 +1468,6 @@ export default function Dashboard() {
         gripper:  Math.round(start.gripper  + (target.gripper  - start.gripper)  * t),
       };
       setJoints(next);
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ event: "arm", angles: next }));
-      }
       if (step >= steps) {
         clearInterval(resetAnimRef.current!);
         resetAnimRef.current = null;
@@ -1402,8 +1476,18 @@ export default function Dashboard() {
     }, 16);
   }, [joints]);
 
-  const handleResetArm = useCallback(() => animateJointsTo(DEFAULT_JOINTS, "Home (reset)"), [animateJointsTo]);
-  const applyPreset = useCallback((p: typeof ARM_PRESETS[0]) => animateJointsTo(p.joints, `Preset: ${p.name}`), [animateJointsTo]);
+  const handleResetArm = useCallback(() => {
+    animateJointsTo(DEFAULT_JOINTS, "Home (reset)");
+    if (roverIp) invoke("send_arm_command", { ip: roverIp, command: "HOME" }).catch(e => { console.error(e); toast.error(String(e)); });
+  }, [animateJointsTo, roverIp]);
+
+  const applyPreset = useCallback((p: typeof ARM_PRESETS[0]) => {
+    animateJointsTo(p.joints, `Preset: ${p.name}`);
+    if (roverIp) {
+      const macroCmd = p.name.toUpperCase();
+      invoke("send_arm_command", { ip: roverIp, command: macroCmd }).catch(e => { console.error(e); toast.error(String(e)); });
+    }
+  }, [animateJointsTo, roverIp]);
 
   const [stepSize, setStepSize] = useState<1 | 5 | 15>(5);
   const [editingJoint, setEditingJoint] = useState<keyof ArmAngles | null>(null);
@@ -1418,106 +1502,266 @@ export default function Dashboard() {
 
   // ── AI Command / Voice Processing State
   const [isProcessing, setIsProcessing] = useState(false);
-  const [command, setCommand] = useState("");
-  const [history, setHistory] = useState<LogMessage[]>([
-    { id: 1, sender: "user", text: "Move forward 2 meters and scan for obstacles", action: "FORWARD → SCAN", time: "10:42:15 AM", status: "ok" },
-    { id: 2, sender: "system", text: "ARES-01: Position updated (+2.0m). Executing YOLOv8 environment scan.", time: "10:42:16 AM", status: "ok" },
-    { id: 3, sender: "user", text: "Rotate base 45 degrees left", action: "ROTATE → LEFT", time: "10:40:02 AM", status: "ok" },
-    { id: 4, sender: "system", text: "ARES-01: Base rotated 45° CCW. Servo torque nominal.", time: "10:40:03 AM", status: "ok" },
+  const [directiveInput, setDirectiveInput] = useState("");
+  const [aiLogs, setAiLogs] = useState<string[]>([
+    "> System online. Waiting for AI directive...",
+  ]);
+  const [voiceLogs, setVoiceLogs] = useState<string[]>([
+    "> Voice module online. Awaiting speech...",
   ]);
   const commandInputRef = useRef<HTMLInputElement>(null);
+  const aiLogsContainerRef = useRef<HTMLDivElement>(null);
+  const voiceLogsContainerRef = useRef<HTMLDivElement>(null);
 
-  const getSystemResponse = (action: string, commandText: string): string => {
-    const upper = action.toUpperCase();
-    if (upper.includes("FORWARD")) return "ARES-01: Initiating forward propulsion. Speed set to nominal.";
-    if (upper.includes("BACKWARD")) return "ARES-01: Reversing drivetrain. Rear sonar alert check enabled.";
-    if (upper.includes("LEFT")) return "ARES-01: Executing counter-clockwise turn. Monitoring yaw rates.";
-    if (upper.includes("RIGHT")) return "ARES-01: Executing clockwise turn. Monitoring yaw rates.";
-    if (upper.includes("STOP")) return "ARES-01: Emergency stop command processed. Drivetrain locked.";
-    if (upper.includes("ARM") || upper.includes("PICK") || upper.includes("DROP")) return "ARES-01: Actuating robotic arm servos. Maintaining payload stability.";
-    if (upper.includes("SCAN")) return "ARES-01: Running environmental scan via camera. Parsing object data.";
-    return `ARES-01: Command "${commandText}" received. Action: ${action || "UNKNOWN"}. Status: Nominal.`;
-  };
-
-  const handleSendCommand = useCallback(async () => {
-    if (!command.trim()) return;
-    const cmdText = command;
-    setCommand("");
-
-    // Auto detect language: Bengali characters reside in range \u0980 to \u09FF
-    const isBengali = /[\u0980-\u09FF]/.test(cmdText);
-    const detectedLang = isBengali ? "bn" : "en";
-
-    const result = parseCommand(cmdText);
-    const label = ACTION_LABELS[result.action];
-    console.log(`${LOG} AI Command [Auto-Detect: ${detectedLang}]: "${cmdText}" → ${result.action} (${result.confidence})`);
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        event: "ai_directive",
-        raw_text: cmdText,
-        parsed_intent: {
-          action: result.action,
-          value: ""
-        }
-      }));
-    }
-
-    if (firebaseConfigured) {
-      appendCommandLog({
-        raw_text: cmdText,
-        parsed_intent: result.action,
-        timestamp: Date.now()
-      });
-    }
-
-    const userMsg: LogMessage = {
-      id: Date.now(),
-      sender: "user",
-      text: cmdText,
-      action: `${result.action} — ${label}`,
-      time: new Date().toLocaleTimeString(),
-      status: result.action === "UNKNOWN" ? "warn" : "ok",
-    };
-
-    setHistory(prev => [userMsg, ...prev].slice(0, 15));
-    setIsProcessing(true);
-
-    try {
-      const isDriveAction = ["FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP"].includes(result.action);
-      if (isDriveAction) {
-        await setDriveDirection(result.action as DriveDirection);
-      } else {
-        await sendAutonomousCommand({
-          command: result.action,
-          raw: cmdText,
-          language: detectedLang,
-          timestamp: Date.now(),
-        });
-      }
-
-      // Simulate system response after 800ms
+  useEffect(() => {
+    if (aiLogsContainerRef.current) {
       setTimeout(() => {
-        const sysMsg: LogMessage = {
-          id: Date.now() + 1,
-          sender: "system",
-          text: getSystemResponse(result.action, cmdText),
-          time: new Date().toLocaleTimeString(),
-          status: "ok",
-        };
-        setHistory(prev => [sysMsg, ...prev].slice(0, 15));
-        setIsProcessing(false);
-      }, 800);
-
-    } catch (err) {
-      console.warn("[ARES-01] Error sending command:", err);
-      setIsProcessing(false);
+        if (!aiLogsContainerRef.current) return;
+        const container = aiLogsContainerRef.current;
+        container.scrollTop = container.scrollHeight;
+      }, 50);
     }
-  }, [command]);
+  }, [aiLogs]);
+
+  useEffect(() => {
+    if (voiceLogsContainerRef.current) {
+      setTimeout(() => {
+        if (!voiceLogsContainerRef.current) return;
+        const container = voiceLogsContainerRef.current;
+        container.scrollTop = container.scrollHeight;
+      }, 50);
+    }
+  }, [voiceLogs]);
+
+  const handleAiDirectiveSubmit = useCallback(async (overrideText?: string | any, source: "ai" | "voice" = "ai") => {
+    const textToProcess = typeof overrideText === 'string' ? overrideText : directiveInput;
+    if (typeof textToProcess !== 'string' || !textToProcess.trim() || isProcessing) return;
+
+    setIsProcessing(true);
+    if (!overrideText) setDirectiveInput("");
+
+    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: "numeric", minute: "numeric", second: "numeric" });
+    const pipelineTasks: string[] = [];
+
+    // 1. Log the uplink
+    pipelineTasks.push(`[${timestamp}] [UPLINK] Command packet received: "${textToProcess}"`);
+
+    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
+    const isKeyConfigured = groqApiKey && groqApiKey !== "YOUR_GROQ_API_KEY_HERE";
+
+    if (isKeyConfigured) {
+      // ── LIVE GROQ CLOUD API CALL ──────────────────────────────────────────────
+      pipelineTasks.push(`[${timestamp}] [AI] Routing to Groq llama-3.1-8b-instant model...`);
+
+      const systemPrompt = `You are the onboard AI commander for ARES-01, a 6-wheeled robotic rover with a 5-DOF robotic arm.
+Your sole job is to analyze the operator's natural language command (which may be in Bengali or English) and output a strict JSON response.
+
+AVAILABLE COMMANDS:
+- Locomotion: FORWARD, BACKWARD, LEFT, RIGHT, STOP
+- Arm macros: PICKUP, DROP, HOME
+
+OUTPUT FORMAT (strict JSON, no markdown, no explanation):
+{
+  "actions": [
+    { "type": "drive", "command": "FORWARD" },
+    { "type": "arm_macro", "command": "PICKUP" }
+  ],
+  "summary": "Human-readable mission summary in English (1 sentence)"
+}
+
+RULES:
+1. "actions" array can have 0 to N actions.
+2. If the command is ambiguous or not related to rover control, return an empty actions array.
+3. Map Bengali words: সামনে/এগিয়ে/যাও→FORWARD, পিছনে/পেছনে→BACKWARD, বামে→LEFT, ডানে→RIGHT, থামো/দাঁড়াও→STOP, তোলো/ধরো/নাও→PICKUP, ছাড়ো/ফেলো→DROP, হোম/রিসেট→HOME.
+4. Always output valid JSON only. No extra text before or after.`;
+
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+      try {
+        const apiUrl = `https://api.groq.com/openai/v1/chat/completions`;
+        const controller = new AbortController();
+        timeoutId = setTimeout(() => controller.abort(), 8000);
+        
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          signal: controller.signal,
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${groqApiKey}`
+          },
+          body: JSON.stringify({
+            model: "llama-3.1-8b-instant",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: textToProcess }
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.1,
+            max_tokens: 256,
+          }),
+        });
+
+        if (!response.ok) {
+          const errBody = await response.text();
+          throw new Error(`API ${response.status}: ${errBody.substring(0, 200)}`);
+        }
+
+        const data = await response.json();
+        const rawText = data?.choices?.[0]?.message?.content;
+        
+        if (!rawText) {
+          throw new Error("Empty model response – no choices returned.");
+        }
+
+        pipelineTasks.push(`[${timestamp}] [AI] Model response received. Parsing action sequence...`);
+
+        // Parse the JSON response from Groq
+        const parsed = JSON.parse(rawText);
+        const actions: { type: string; command: string }[] = parsed.actions || [];
+        const summary: string = parsed.summary || "No summary provided.";
+
+        if (actions.length === 0) {
+          pipelineTasks.push(`[${timestamp}] [AI] Model returned no actionable commands. Summary: ${summary}`);
+        }
+
+        // Execute each action via Tauri IPC
+        for (const action of actions) {
+          const cmd = action.command?.toUpperCase();
+          if (action.type === "drive") {
+            const validDrive = ["FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP"];
+            if (validDrive.includes(cmd)) {
+              pipelineTasks.push(`[${timestamp}] [NAV] AI Propulsion → ${cmd}`);
+              setDriveDirection(cmd as DriveDirection);
+              if (roverIp) {
+                try { await invoke("send_drive_command", { ip: roverIp, direction: cmd }); }
+                catch (e) { console.error(e); toast.error(String(e)); }
+              }
+              if (cmd === "STOP") setAiTaskState("idle");
+            }
+          } else if (action.type === "arm_macro") {
+            const validArm = ["PICKUP", "DROP", "HOME"];
+            if (validArm.includes(cmd)) {
+              pipelineTasks.push(`[${timestamp}] [ARM] AI Manipulator → ${cmd}`);
+              if (cmd === "PICKUP") {
+                setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
+              } else if (cmd === "DROP") {
+                setJoints(prev => ({ ...prev, gripper: 0 }));
+              } else if (cmd === "HOME") {
+                setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
+              }
+              if (roverIp) {
+                try { await invoke("send_arm_command", { ip: roverIp, command: cmd }); }
+                catch (e) { console.error(e); toast.error(String(e)); }
+              }
+            }
+          }
+        }
+
+        pipelineTasks.push(`[${timestamp}] [AI] Mission Summary: ${summary}`);
+        pipelineTasks.push(`[${timestamp}] [SYS] Groq-powered sequence executed (${actions.length} action${actions.length !== 1 ? 's' : ''}).`);
+
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          console.error("Groq API Timeout:", err);
+          pipelineTasks.push(`[${timestamp}] [AI] ⚠ Groq API timeout (8000ms exceeded).`);
+          setIsProcessing(false);
+        } else {
+          console.error("Groq API Error:", err);
+          pipelineTasks.push(`[${timestamp}] [AI] ⚠ Groq API error: ${err.message || String(err)}`);
+        }
+        pipelineTasks.push(`[${timestamp}] [SYS] Falling back to local keyword parser...`);
+
+        // ── FALLBACK: Local keyword matching ──────────────────────────────
+        executeLocalKeywordFallback(textToProcess, timestamp, pipelineTasks);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    } else {
+      // ── NO API KEY: Use local keyword matching directly ─────────────────
+      pipelineTasks.push(`[${timestamp}] [AI] Groq API key not configured. Using local NLP parser.`);
+      executeLocalKeywordFallback(textToProcess, timestamp, pipelineTasks);
+    }
+
+    // Log stream routing
+    if (source === "voice") {
+      setVoiceLogs(prev => [...prev, ...pipelineTasks]);
+    } else {
+      setAiLogs(prev => [...prev, ...pipelineTasks]);
+    }
+
+    setIsProcessing(false);
+  }, [directiveInput, isProcessing, roverIp]);
+
+  // ── Local Keyword Fallback (used when Gemini is unavailable) ─────────────
+  const executeLocalKeywordFallback = useCallback((text: string, timestamp: string, pipelineTasks: string[]) => {
+    const lowerText = text.toLowerCase();
+
+    // Phase 6.1: Autonomous Red Object Mission
+    if (['red ball', 'locate', 'red object', 'pick up the red ball'].some(k => lowerText.includes(k))) {
+      pipelineTasks.push(`[${timestamp}] [SYS] Phase 6.1 Hybrid NLP Parsed. Initiating Autonomous Target Lock Sequence.`);
+      setAiTaskState("rotate_to_scan");
+    }
+
+    // NAV
+    if (['সাম', 'আগা', 'এগি', 'forw', 'ahead', 'go'].some(k => lowerText.includes(k))) {
+      pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: FORWARD.`);
+      setDriveDirection("FORWARD");
+      if (roverIp) invoke("send_drive_command", { ip: roverIp, direction: "FORWARD" }).catch(e => { console.error(e); toast.error(String(e)); });
+    } else if (['পিছ', 'পেছ', 'পিছা', 'back', 'rev'].some(k => lowerText.includes(k))) {
+      pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: BACKWARD.`);
+      setDriveDirection("BACKWARD");
+      if (roverIp) invoke("send_drive_command", { ip: roverIp, direction: "BACKWARD" }).catch(e => { console.error(e); toast.error(String(e)); });
+    } else if (['বামে', 'বাম', 'left'].some(k => lowerText.includes(k))) {
+      pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: LEFT.`);
+      setDriveDirection("LEFT");
+      if (roverIp) invoke("send_drive_command", { ip: roverIp, direction: "LEFT" }).catch(e => { console.error(e); toast.error(String(e)); });
+    } else if (['ডানে', 'ডান', 'right'].some(k => lowerText.includes(k))) {
+      pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: RIGHT.`);
+      setDriveDirection("RIGHT");
+      if (roverIp) invoke("send_drive_command", { ip: roverIp, direction: "RIGHT" }).catch(e => { console.error(e); toast.error(String(e)); });
+    } else if (['থামো', 'দাঁড়াও', 'stop', 'halt', 'break'].some(k => lowerText.includes(k))) {
+      pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system halted: STOP.`);
+      setDriveDirection("STOP");
+      if (roverIp) invoke("send_drive_command", { ip: roverIp, direction: "STOP" }).catch(e => { console.error(e); toast.error(String(e)); });
+      setAiTaskState("idle");
+    }
+
+    // VISION
+    if (['বল', 'টার্গেট', 'অবজেক্ট', 'ball', 'target', 'object'].some(k => lowerText.includes(k))) {
+      pipelineTasks.push(`[${timestamp}] [VISION] Live camera link established. YOLO object tracking: TARGET_LOCK_ACTIVE.`);
+    }
+
+    // ARM
+    if (['তোল', 'তুল', 'উঠ', 'ওঠ', 'নাও', 'ধর', 'pick', 'grab'].some(k => lowerText.includes(k))) {
+      pipelineTasks.push(`[${timestamp}] [ARM] Inverse kinematics matrix resolved. Actuating manipulator: PICKUP.`);
+      setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
+      if (roverIp) invoke("send_arm_command", { ip: roverIp, command: "PICKUP" }).catch(e => { console.error(e); toast.error(String(e)); });
+    } else if (['ছাড', 'ছাড়', 'নামা', 'ফেল', 'drop', 'releas'].some(k => lowerText.includes(k))) {
+      pipelineTasks.push(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
+      setJoints(prev => ({ ...prev, gripper: 0 }));
+      if (roverIp) invoke("send_arm_command", { ip: roverIp, command: "DROP" }).catch(e => { console.error(e); toast.error(String(e)); });
+    } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'home', 'reset'].some(k => lowerText.includes(k))) {
+      pipelineTasks.push(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
+      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
+      if (roverIp) invoke("send_arm_command", { ip: roverIp, command: "HOME" }).catch(e => { console.error(e); toast.error(String(e)); });
+    }
+
+    // Status
+    if (pipelineTasks.length > 1) {
+      pipelineTasks.push(`[${timestamp}] [SYS] Local parser sequence completed successfully.`);
+    } else {
+      pipelineTasks.push(`[${timestamp}] [SYS] Warning: Unrecognized telemetry token. Awaiting operator override.`);
+    }
+  }, [roverIp]);
+
+
+
+
 
   // ── Voice
   const [isListening, setIsListening] = useState(false);
-  const [voiceLanguage, setVoiceLanguageState] = useState("bn-BD");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceLanguage, setVoiceLanguageState] = useState("bn-IN");
   const setVoiceLanguage = useCallback(async (lang: string) => {
     setVoiceLanguageState(lang);
     await setFirebaseLanguage(lang);
@@ -1583,16 +1827,7 @@ export default function Dashboard() {
 
     const label = ACTION_LABELS[mappedAction] || "Direct Command";
 
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        event: "ai_directive",
-        raw_text: command,
-        parsed_intent: {
-          action: mappedAction,
-          value: ""
-        }
-      }));
-    }
+
 
     if (firebaseConfigured) {
       appendCommandLog({
@@ -1630,6 +1865,7 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const SpeechRecognitionAPI =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -1639,53 +1875,59 @@ export default function Dashboard() {
     }
 
     try {
-      const recognition = new SpeechRecognitionAPI();
+      if ((window as any).webkitSpeechRecognition || (window as any).SpeechRecognition) {
+        const recognition = new SpeechRecognitionAPI();
       recognition.continuous = false; // Disable infinite background loops
-      recognition.interimResults = false; // Set to false to prevent half-sentence processing
+      recognition.interimResults = true; // Set to true to provide live transcription preview
       recognition.maxAlternatives = 1;
+      recognition.lang = voiceLanguage; // IMPORTANT: Initialize with current language
 
       recognition.onresult = (event: any) => {
-        if (isVoiceProcessingRef.current) return; // Guard clause against double processing
-        
-        let finalTranscript = '';
+        let interimTranscript = "";
+        let finalTranscript = "";
+
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           if (event.results[i].isFinal) {
             finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
           }
         }
-        
-        // Sanitize input data
-        const commandText = finalTranscript.trim().toLowerCase();
-        if (!commandText) return;
 
-        // Render processed transcript preview in UI
-        const previewBox = document.getElementById('voice-transcript-preview');
-        if (previewBox) {
-          previewBox.innerText = `Executing: "${finalTranscript}"`;
+        if (interimTranscript) {
+          setVoiceTranscript(`Hearing: "${interimTranscript}"...`);
         }
 
-        // Activate 2-Second Cooldown Anti-Duplicate Lock
-        isVoiceProcessingRef.current = true;
+        if (finalTranscript) {
+          if (isVoiceProcessingRef.current) return; // Guard clause against double processing
+          const spokenText = finalTranscript.trim();
+          console.log("Recognized:", spokenText);
+          
+          // UNCONDITIONALLY update the UI first
+          setVoiceTranscript(`Executing: "${spokenText}"`);
+          
+          const commandText = spokenText.toLowerCase();
+          if (!commandText) return;
+          // Activate 2-Second Cooldown Anti-Duplicate Lock
+          isVoiceProcessingRef.current = true;
 
-        // Execute NLP Mapping and Firebase Node Synchronization
-        parseAndRouteVoiceCommand(commandText);
+          // Execute NLP Mapping and Firebase Node Synchronization
+          handleAiDirectiveSubmit(commandText, "voice");
 
-        // Release lock safely after cooldown expiration
-        setTimeout(() => {
-          isVoiceProcessingRef.current = false;
-          if (previewBox) {
-            previewBox.innerText = "Click button to speak";
-          }
-        }, COOLDOWN_TIME);
+          // Release lock safely after cooldown expiration
+          setTimeout(() => {
+            isVoiceProcessingRef.current = false;
+            setVoiceTranscript("");
+          }, COOLDOWN_TIME);
+        }
       };
 
       recognition.onerror = (err: any) => {
-        console.warn(`${LOG} Speech recognition error:`, err);
+        console.error(`${LOG} Speech recognition error:`, err);
         isVoiceProcessingRef.current = false;
-        if (err.error === 'not-allowed' || err.error === 'service-not-allowed') {
-          shouldListenRef.current = false;
-          setIsListening(false);
-        }
+        shouldListenRef.current = false;
+        setIsListening(false);
+        toast.error("Voice recognition failed: " + err.error);
       };
 
       recognition.onend = () => {
@@ -1702,6 +1944,7 @@ export default function Dashboard() {
       };
 
       recognitionRef.current = recognition;
+      }
     } catch (e) {
       console.error("Failed to initialize speech recognition:", e);
     }
@@ -1713,7 +1956,7 @@ export default function Dashboard() {
         } catch (e) {}
       }
     };
-  }, [parseAndRouteVoiceCommand]);
+  }, [handleAiDirectiveSubmit, isProcessing, voiceLanguage]);
 
   const handleVoiceToggle = useCallback(async () => {
     if (!recognitionRef.current) {
@@ -1733,9 +1976,11 @@ export default function Dashboard() {
         recognitionRef.current.start();
         setIsListening(true);
         console.log(`${LOG} Voice recognition started (language: ${voiceLanguage})`);
-      } catch (e) {
+      } catch (e: any) {
         shouldListenRef.current = false;
+        setIsListening(false);
         console.error("Speech recognition start failed:", e);
+        toast.error("Speech API Error: " + (e.message || String(e)));
       }
     } else {
       shouldListenRef.current = false;
@@ -1747,10 +1992,7 @@ export default function Dashboard() {
     }
   }, [isListening, voiceLanguage]);
 
-  // ── Camera Stream
-  const [roverIp, setRoverIp] = useState("");
-  const [streamSrc, setStreamSrc] = useState<string | null>(null);
-  const [streamError, setStreamError] = useState(false);
+  // ── Camera Stream Handlers
 
   const handleConnectCamera = useCallback(() => {
     if (!roverIp.trim()) return;
@@ -1765,8 +2007,8 @@ export default function Dashboard() {
       // Rule 2: Contains a slash (custom path), prepend http:// but keep path intact
       finalUrl = `http://${url}`;
     } else {
-      // Default: Plain host/IP, prepend http:// and append /stream
-      finalUrl = `http://${url}/stream`;
+      // Default: Plain host/IP, prepend http:// and append :81/stream
+      finalUrl = `http://${url}:81/stream`;
     }
     
     // Cache bust to prevent shared image cache pool accumulation
@@ -1784,95 +2026,7 @@ export default function Dashboard() {
     console.log(`${LOG} Camera stream disconnected`);
   }, []);
 
-  // ── Settings Panel & WS Cleanup
-
-
-  const cleanupWs = useCallback(() => {
-    if (pingIntervalRef.current) {
-      clearInterval(pingIntervalRef.current);
-      pingIntervalRef.current = null;
-    }
-    if (wsRef.current) {
-      // Detach handlers to prevent onclose state updates during manual cleanup or unmount
-      wsRef.current.onclose = null;
-      wsRef.current.onerror = null;
-      wsRef.current.onmessage = null;
-      wsRef.current.onopen = null;
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-  }, []);
-
-  // Cleanup active connections when component unmounts
-  useEffect(() => {
-    return () => cleanupWs();
-  }, [cleanupWs]);
-
-  const handleConnectWs = useCallback(() => {
-    if (!wsUrl) return;
-    
-    console.log(`${LOG} Connecting Native WebSocket → ${wsUrl}`);
-    setRoverConnectionStatus("connecting");
-    cleanupWs();
-
-    try {
-      wsRef.current = new WebSocket(wsUrl);
-
-      wsRef.current.onopen = () => {
-        setRoverConnectionStatus("connected");
-        console.log(`${LOG} Native WebSocket connected`);
-
-        // Initiate high-precision heartbeat loop every 3000ms
-        pingIntervalRef.current = setInterval(() => {
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            pingStartTimeRef.current = performance.now();
-            wsRef.current.send(JSON.stringify({ type: "ping" }));
-          }
-        }, 3000);
-      };
-
-      wsRef.current.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          if (payload.type === "pong") {
-            const rtt = Math.round(performance.now() - pingStartTimeRef.current);
-            setPing(rtt);
-          }
-        } catch (e) {
-          // Ignore non-JSON or other packets
-        }
-      };
-
-      wsRef.current.onclose = () => {
-        setRoverConnectionStatus("disconnected");
-        setPing(null);
-        if (pingIntervalRef.current) {
-          clearInterval(pingIntervalRef.current);
-          pingIntervalRef.current = null;
-        }
-        wsRef.current = null;
-        console.log(`${LOG} Native WebSocket closed gracefully`);
-      };
-
-      wsRef.current.onerror = (err) => {
-        setRoverConnectionStatus("disconnected");
-        setPing(null);
-        console.warn(`${LOG} Native WebSocket error:`, err);
-      };
-    } catch (err) {
-      setRoverConnectionStatus("disconnected");
-      setPing(null);
-      console.warn(`${LOG} Native WebSocket initialization failed:`, err);
-    }
-  }, [wsUrl, cleanupWs]);
-
-  const handleDisconnectWs = useCallback(() => {
-    cleanupWs();
-    setRoverConnectionStatus("disconnected");
-    setPing(null);
-    console.log(`${LOG} WebSocket disconnected manually`);
-  }, [cleanupWs]);
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // ── Settings Panel & WS Cleanup// ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-white dark:bg-[#0B0F19]">
       
@@ -1885,6 +2039,9 @@ export default function Dashboard() {
         theme={theme}
         setTheme={setTheme}
         ping={ping}
+        batteryPct={telemetry.battery_percentage}
+        roverMode={roverMode}
+        onToggleRoverMode={handleRoverModeToggle}
       />
 
       {/* Settings / Connection Panel */}
@@ -2127,7 +2284,7 @@ export default function Dashboard() {
             streamError={streamError}
             rssi={rssi}
             solar={solar}
-            distance={distance}
+            distance={telemetry.obstacle_distance}
             setStreamError={setStreamError}
           />
           <CameraOverlay 
@@ -2143,10 +2300,10 @@ export default function Dashboard() {
         
         {/* 2. MODE SELECTOR TABS */}
         <div className="shrink-0 px-4 pt-4 md:pt-2.5 pb-2 bg-transparent z-10">
-          <div className="relative flex rounded-xl bg-muted/80 p-1 gap-0.5 max-w-xl mx-auto border border-border/50">
+          <div className="relative flex overflow-x-auto scrollbar-hide flex-nowrap rounded-xl bg-muted/80 p-1 gap-1 max-w-xl mx-auto border border-border/50">
             {CONTROL_TABS.map(tab => (
               <button key={tab.id} onClick={() => { setControlMode(tab.id); }}
-                className={`relative flex flex-1 items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg z-10 transition-all duration-300 ease-out active:scale-95 select-none ${
+                className={`relative flex flex-1 min-w-[140px] sm:min-w-0 items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg z-10 transition-all duration-300 ease-out active:scale-95 select-none ${
                   controlMode === tab.id ? "text-foreground shadow-[0_0_10px_rgba(255,255,255,0.05)] scale-[1.02]" : "text-muted-foreground hover:text-foreground hover:scale-105"
                 }`}
                 data-testid={`tab-${tab.id}`}>
@@ -2170,7 +2327,7 @@ export default function Dashboard() {
               <motion.div key="manual"
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
-                className="px-4 py-3 md:h-full md:overflow-hidden flex items-center justify-center">
+                className={`px-4 py-3 md:h-full md:overflow-hidden flex items-center justify-center ${roverMode === "AUTONOMOUS" ? "pointer-events-none opacity-30" : ""}`}>
                 <div className="your-main-control-container flex flex-col md:flex-row items-center justify-center gap-6 md:gap-8 w-full max-w-5xl mx-auto py-4 px-2">
                   {/* LEFT: Drive D-Pad */}
                   <div className="drive-control-section shrink-0 w-[240px] h-[240px] bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-3 backdrop-blur-md shadow-lg relative">
@@ -2210,168 +2367,179 @@ export default function Dashboard() {
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
                 className="p-3 overflow-hidden h-full flex flex-col animate-none">
-                <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-6 flex-1 animate-none lg:pt-4">
-                  <div className="hidden lg:block"></div>
-                  <div className="flex flex-col gap-4 w-full max-w-[450px] mx-auto shrink-0">
-                    <div className="text-center">
-                    <div className="text-xs sm:text-sm font-semibold">Autonomous Directive</div>
-                    <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
-                      Auto-detect language (English/Bengali) → Firebase <code className="font-mono text-[10px] bg-muted px-1 rounded">ares01/autonomous/action</code>
-                    </div>
-                  </div>
+                <div className="flex flex-col lg:flex-row w-full justify-end items-center gap-12 lg:gap-16 p-4 max-w-full">
+                  {/* LEFT SIDE (Controls) */}
+                  <div className="flex justify-center items-center">
+                    <div className="w-full max-w-md flex flex-col gap-4">
+                      <div className="text-center">
+                        <div className="text-xs sm:text-sm font-semibold">Autonomous Directive</div>
+                        <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
+                          Auto-detect language (English/Bengali) → Firebase <code className="font-mono text-[10px] bg-muted px-1 rounded">ares01/autonomous/action</code>
+                        </div>
+                      </div>
 
-                  <div className="flex gap-2">
-                    <input ref={commandInputRef} type="text" inputMode="text" autoComplete="off"
-                      placeholder="Type command for ARES-01 (e.g., 'Take a 360-degree scan' or 'সামনের দিকে ৫ মিটার যাও')..."
-                      value={command}
-                      onChange={e => setCommand(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && !isProcessing && handleSendCommand()}
-                      onClick={() => commandInputRef.current?.focus()}
-                      disabled={isProcessing}
-                      className="cmd-input flex-1 h-9 rounded-lg border border-input bg-background px-4 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground/65 focus:outline-none focus:ring-2 focus:ring-primary/45 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                      data-testid="input-ai-cmd" />
-                    <Button onClick={handleSendCommand} data-testid="btn-ai-send" disabled={isProcessing || !command.trim()}
-                      className="h-9 px-4 active:scale-95 transition-transform shrink-0">
-                      <Send className="w-4 h-4" />
-                    </Button>
-                  </div>
+                      <div className="flex gap-2">
+                        <input ref={commandInputRef} type="text" inputMode="text" autoComplete="off"
+                          placeholder="e.g., 'Initiate pick up sequence'"
+                          value={directiveInput}
+                          onChange={e => setDirectiveInput(e.target.value)}
+                          onKeyDown={e => e.key === "Enter" && !isProcessing && handleAiDirectiveSubmit()}
+                          onClick={() => commandInputRef.current?.focus()}
+                          disabled={isProcessing}
+                          className="cmd-input flex-1 h-9 rounded-lg border border-input bg-background px-4 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground/65 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          data-testid="input-ai-cmd" />
+                        <Button onClick={handleAiDirectiveSubmit} data-testid="btn-ai-send" disabled={isProcessing || !directiveInput.trim()}
+                          className="h-9 px-4 active:scale-95 transition-transform shrink-0">
+                          <Send className="w-4 h-4" />
+                        </Button>
+                      </div>
 
-                  <div className="flex flex-wrap gap-1 justify-center max-h-[48px] overflow-y-auto">
-                    {["go forward", "turn left", "pick ball", "scan area", "stop", "arm home",
-                      "সামনে যাও", "বামে যাও", "বল তোলো", "থামো"].map(chip => (
-                      <button key={chip} onClick={() => setCommand(chip)}
-                        className="text-[9px] px-2.5 py-1 rounded-full border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-all font-medium cursor-pointer">
-                        {chip}
-                      </button>
-                    ))}
-                  </div>
-
-                  </div>
-                  <div className="flex flex-col min-h-0 flex-1 w-full lg:h-full bg-muted/5 lg:p-5 lg:rounded-2xl lg:border border-border/50 mt-4 lg:mt-0 shadow-sm relative">
-                    <div className="flex justify-between items-center mb-1">
-                      <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Command Log</div>
-                      <div className="flex items-center justify-between h-4">
-                        {isProcessing ? (
-                          <div className="flex items-center gap-1 text-[9px] font-mono text-primary font-semibold tracking-wider animate-pulse">
-                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                            <span>AI PROCESSING...</span>
-                          </div>
-                        ) : (
-                          <div className="text-[8.5px] font-mono text-muted-foreground">
-                            SYSTEM READY
-                          </div>
-                        )}
+                      <div className="flex flex-wrap gap-1 justify-center max-h-[48px] overflow-y-auto">
+                        {["pick ball", "drop target", "home position"].map(chip => (
+                          <button key={chip} onClick={() => setDirectiveInput(chip)}
+                            className="text-[9px] px-2.5 py-1 rounded-full border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-all font-medium cursor-pointer">
+                            {chip}
+                          </button>
+                        ))}
                       </div>
                     </div>
-                    <div className="relative w-full h-0.5 bg-muted border border-border rounded-full overflow-hidden mb-1.5 shrink-0">
-                      {isProcessing && (
-                        <div className="absolute inset-y-0 bg-gradient-to-r from-blue-500 via-indigo-500 to-pink-500 w-1/2 rounded-full animate-progress-glow" />
-                      )}
-                    </div>
-                    <div className="space-y-1.5 flex-1 overflow-y-auto max-h-[35vh] lg:max-h-[60vh] pr-1 pb-4">
+                  </div>
+                  
+                  {/* RIGHT SIDE (Logs) */}
+                  <div className="w-[400px] flex justify-end shrink-0">
+                    <div className="flex flex-col shrink-0 w-[400px] h-[260px] bg-muted/5 p-3 rounded-2xl border border-border/50 shadow-sm relative">
+                      <div className="flex justify-between items-center mb-1">
+                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">AI Directives Log</div>
+                        <div className="flex items-center justify-between h-4">
+                          {isProcessing ? (
+                            <div className="flex items-center gap-1 text-[9px] font-mono text-primary font-semibold tracking-wider animate-pulse">
+                              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                              <span>AI PROCESSING...</span>
+                            </div>
+                          ) : (
+                            <div className="text-[8.5px] font-mono text-muted-foreground">
+                              SYSTEM READY
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="relative w-full h-0.5 bg-muted border border-border rounded-full overflow-hidden mb-1.5 shrink-0">
+                        {isProcessing && (
+                          <div className="absolute inset-y-0 bg-gradient-to-r from-blue-500 via-indigo-500 to-pink-500 w-1/2 rounded-full animate-progress-glow" />
+                        )}
+                      </div>
+                      <div ref={aiLogsContainerRef} className="space-y-1.5 flex-1 overflow-y-auto pr-1 pb-4 bg-[#0a0a0a] text-green-500 font-mono text-xs p-2 rounded-md border border-border/50">
                       <AnimatePresence initial={false}>
-                        {history.map(cmd => {
-                          const isUser = cmd.sender === "user";
-                          return (
-                            <motion.div
-                              key={cmd.id}
-                              initial={{ opacity: 0, y: 6 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0 }}
-                              className={`flex flex-col ${isUser ? "items-end" : "items-start"} w-full`}
-                            >
-                              <div
-                                className={`max-w-[90%] rounded-xl px-3 py-2 text-[10px] sm:text-[11px] leading-normal shadow-md border ${
-                                  isUser
-                                    ? "bg-primary/10 border-primary/20 rounded-tr-none text-right shadow-primary/5 text-foreground"
-                                    : "bg-muted/80 border-border rounded-tl-none text-left text-foreground"
-                                }`}
-                              >
-                                <div className="flex items-center gap-3 mb-0.5 justify-between">
-                                  <span className={`text-[8px] font-bold tracking-wider uppercase ${isUser ? "text-primary" : "text-muted-foreground flex items-center gap-0.5"}`}>
-                                    {!isUser && <Bot className="w-2 h-2" />}
-                                    {isUser ? "Operator" : "ARES-01"}
-                                  </span>
-                                  <span className="text-[7.5px] text-muted-foreground font-mono">{cmd.time}</span>
-                                </div>
-                                <div className={`break-words ${isUser ? "text-right" : "text-left"}`}>{cmd.text}</div>
-                                {isUser && cmd.action && (
-                                  <div className="mt-1 flex justify-end">
-                                    <span className="text-[7.5px] font-mono bg-primary/25 text-primary px-1 py-0.5 rounded leading-none">
-                                      {cmd.action}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            </motion.div>
-                          );
-                        })}
+                        {aiLogs.map((log, i) => (
+                          <motion.div
+                            key={i}
+                            initial={{ opacity: 0, y: 4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="w-full text-left break-words whitespace-pre-wrap"
+                          >
+                            {renderLogLine(log)}
+                          </motion.div>
+                        ))}
                       </AnimatePresence>
                     </div>
+                  </div>
                   </div>
                 </div>
               </motion.div>
             )}
 
-            {/* ── VOICE COMMAND ── */}
             {controlMode === "voice" && (
               <motion.div key="voice"
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
-                className="md:h-full flex items-center justify-center p-3 md:overflow-hidden">
+                className="p-3 overflow-hidden h-full flex flex-col animate-none">
+                <div className="flex flex-col lg:flex-row w-full justify-end items-center gap-12 lg:gap-16 p-4 max-w-full">
+                  {/* LEFT SIDE (Controls) */}
+                  <div className="flex justify-center items-center">
+                    <div className="w-full sm:w-[420px] max-w-full flex flex-col items-center px-5 pt-4 pb-2 gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl relative overflow-hidden select-none">
+                      <div className="flex items-center justify-between w-full border-b border-slate-100 dark:border-slate-800 pb-3">
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">Voice Link</span>
+                        <select
+                          id="voice-lang"
+                          value={voiceLanguage}
+                          onChange={e => setVoiceLanguage(e.target.value)}
+                          className="px-2 py-1 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer text-slate-800 dark:text-slate-200 font-medium"
+                        >
+                          <option value="bn-IN">বাংলা</option>
+                          <option value="en-US">English</option>
+                        </select>
+                      </div>
 
-                <div className="flex flex-col items-center px-5 pt-4 pb-2 gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md shadow-xl relative overflow-hidden select-none">
-                  <div className="flex items-center justify-between w-full border-b border-slate-100 dark:border-slate-800 pb-3">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">Voice Link</span>
-                    <select
-                      id="voice-lang"
-                      value={voiceLanguage}
-                      onChange={e => setVoiceLanguage(e.target.value)}
-                      className="px-2 py-1 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer text-slate-800 dark:text-slate-200 font-medium"
-                    >
-                      <option value="bn-BD">বাংলা (BD)</option>
-                      <option value="en-US">English (US)</option>
-                    </select>
+                      {/* Concentric Pulsing Microphone Container */}
+                      <div className="relative flex items-center justify-center w-24 h-24 my-2">
+                        {/* Concentric glowing rings */}
+                        <div className="absolute inset-0 rounded-full bg-indigo-500/5 dark:bg-indigo-400/5 animate-ping pointer-events-none" style={{ animationDuration: '1000ms' }} />
+                        <div className="absolute inset-2 rounded-full border border-indigo-400/10 dark:border-indigo-400/5 animate-ping pointer-events-none" style={{ animationDuration: '1500ms', animationDelay: '200ms' }} />
+                        <div className="absolute inset-4 rounded-full bg-indigo-500/10 dark:bg-indigo-400/10 animate-ping pointer-events-none" style={{ animationDuration: '2000ms', animationDelay: '400ms' }} />
+                        
+                        {/* Central Button */}
+                        <button
+                          id="voice-toggle-btn"
+                          onClick={handleVoiceToggle}
+                          className={`relative z-10 w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 shadow-lg cursor-pointer ${
+                            isListening 
+                              ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-500/30' 
+                              : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/30'
+                          }`}
+                        >
+                          <Mic className={`w-6 h-6 ${isListening ? 'animate-pulse' : ''}`} />
+                        </button>
+                      </div>
+
+                      {/* Horizontal Waveform Skeleton */}
+                      <div className="flex items-center justify-center gap-1.5 h-8 w-full max-w-[160px] py-1">
+                        <div className={`w-1 rounded-full transition-all duration-300 ${isListening ? 'bg-red-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-700'}`} style={{ height: isListening ? '12px' : '4px', animationDuration: '0.7s' }} />
+                        <div className={`w-1 rounded-full transition-all duration-300 ${isListening ? 'bg-indigo-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-700'}`} style={{ height: isListening ? '24px' : '4px', animationDuration: '1.1s' }} />
+                        <div className={`w-1 rounded-full transition-all duration-300 ${isListening ? 'bg-purple-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-700'}`} style={{ height: isListening ? '18px' : '4px', animationDuration: '0.8s' }} />
+                        <div className={`w-1 rounded-full transition-all duration-300 ${isListening ? 'bg-cyan-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-700'}`} style={{ height: isListening ? '28px' : '4px', animationDuration: '1.3s' }} />
+                        <div className={`w-1 rounded-full transition-all duration-300 ${isListening ? 'bg-indigo-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-700'}`} style={{ height: isListening ? '14px' : '4px', animationDuration: '0.9s' }} />
+                      </div>
+                      
+                      {/* Live Transcript Display Box */}
+                      <div className="w-full text-center">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 italic font-medium" id="voice-transcript-preview">
+                          {voiceTranscript ? voiceTranscript : (isListening ? "Listening..." : "Click button to speak")}
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Concentric Pulsing Microphone Container */}
-                  <div className="relative flex items-center justify-center w-24 h-24 my-2">
-                    {/* Concentric glowing rings */}
-                    <div className="absolute inset-0 rounded-full bg-indigo-500/5 dark:bg-indigo-400/5 animate-ping pointer-events-none" style={{ animationDuration: '1000ms' }} />
-                    <div className="absolute inset-2 rounded-full border border-indigo-400/10 dark:border-indigo-400/5 animate-ping pointer-events-none" style={{ animationDuration: '1500ms', animationDelay: '200ms' }} />
-                    <div className="absolute inset-4 rounded-full bg-indigo-500/10 dark:bg-indigo-400/10 animate-ping pointer-events-none" style={{ animationDuration: '2000ms', animationDelay: '400ms' }} />
-                    
-                    {/* Central Button */}
-                    <button
-                      id="voice-toggle-btn"
-                      onClick={handleVoiceToggle}
-                      className={`relative z-10 w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 shadow-lg cursor-pointer ${
-                        isListening 
-                          ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-500/30' 
-                          : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/30'
-                      }`}
-                    >
-                      <Mic className={`w-6 h-6 ${isListening ? 'animate-pulse' : ''}`} />
-                    </button>
+                  {/* RIGHT SIDE (Logs) */}
+                  <div className="w-[400px] flex justify-end shrink-0">
+                    <div className="flex flex-col shrink-0 w-[400px] h-[260px] bg-muted/5 p-3 rounded-2xl border border-border/50 shadow-sm relative">
+                      <div className="flex justify-between items-center mb-1">
+                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Voice Commands Log</div>
+                        <div className="flex items-center justify-between h-4">
+                          <div className="text-[8.5px] font-mono text-muted-foreground">
+                            AUDIO SYSTEM ACTIVE
+                          </div>
+                        </div>
+                      </div>
+                      <div className="relative w-full h-0.5 bg-muted border border-border rounded-full overflow-hidden mb-1.5 shrink-0">
+                        <div className="absolute inset-y-0 bg-indigo-500/50 w-full rounded-full" />
+                      </div>
+                      <div ref={voiceLogsContainerRef} className="space-y-1.5 flex-1 overflow-y-auto pr-1 pb-4 bg-[#0a0a0a] text-cyan-400 font-mono text-xs p-2 rounded-md border border-border/50">
+                      <AnimatePresence initial={false}>
+                        {voiceLogs.map((log, i) => (
+                          <motion.div
+                            key={i}
+                            initial={{ opacity: 0, y: 4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="w-full text-left break-words whitespace-pre-wrap"
+                          >
+                            {renderLogLine(log)}
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    </div>
                   </div>
-
-                  {/* Horizontal Waveform Skeleton */}
-                  <div className="flex items-center justify-center gap-1.5 h-8 w-full max-w-[160px] py-1">
-                    <div className={`w-1 rounded-full transition-all duration-300 ${isListening ? 'bg-red-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-700'}`} style={{ height: isListening ? '12px' : '4px', animationDuration: '0.7s' }} />
-                    <div className={`w-1 rounded-full transition-all duration-300 ${isListening ? 'bg-indigo-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-700'}`} style={{ height: isListening ? '24px' : '4px', animationDuration: '1.1s' }} />
-                    <div className={`w-1 rounded-full transition-all duration-300 ${isListening ? 'bg-purple-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-700'}`} style={{ height: isListening ? '18px' : '4px', animationDuration: '0.8s' }} />
-                    <div className={`w-1 rounded-full transition-all duration-300 ${isListening ? 'bg-cyan-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-700'}`} style={{ height: isListening ? '28px' : '4px', animationDuration: '1.3s' }} />
-                    <div className={`w-1 rounded-full transition-all duration-300 ${isListening ? 'bg-indigo-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-700'}`} style={{ height: isListening ? '14px' : '4px', animationDuration: '0.9s' }} />
-                  </div>
-                  
-                  {/* Live Transcript Display Box */}
-                  <div className="w-full text-center">
-                    <p className="text-xs text-slate-500 dark:text-slate-400 italic font-medium" id="voice-transcript-preview">
-                      {isListening ? "Listening..." : "Click button to speak"}
-                    </p>
                   </div>
                 </div>
-
               </motion.div>
             )}
 

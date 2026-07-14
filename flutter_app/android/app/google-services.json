@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "719697570239",
+    "firebase_url": "https://ares-01-i2p-default-rtdb.firebaseio.com",
+    "project_id": "ares-01-i2p",
+    "storage_bucket": "ares-01-i2p.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:719697570239:android:de86e8d08e8932c3d9190a",
+        "android_client_info": {
+          "package_name": "com.example.rover_control_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAV0dqHKv133xji8b1Db72HyD0yp2Y4xng"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

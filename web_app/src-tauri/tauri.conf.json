@@ -20,7 +20,10 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "transparent": false
+        "transparent": false,
+        "visible": true,
+        "theme": "Dark",
+        "backgroundColor": [10, 10, 10, 255]
       }
     ],
     "security": {

@@ -1,63 +1,82 @@
-export const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+let audioCtx: AudioContext | null = null;
+
+function getAudioCtx() {
+  if (typeof window === 'undefined') return null;
+  if (!audioCtx) {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass) {
+        audioCtx = new AudioContextClass();
+      }
+    } catch (e) {
+      console.warn("AudioContext initialization failed", e);
+    }
+  }
+  return audioCtx;
+}
 
 export function playBootChime() {
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') {
+    ctx.resume();
   }
   
-  const osc1 = audioCtx.createOscillator();
-  const osc2 = audioCtx.createOscillator();
-  const gainNode = audioCtx.createGain();
-  const filter = audioCtx.createBiquadFilter();
+  const osc1 = ctx.createOscillator();
+  const osc2 = ctx.createOscillator();
+  const gainNode = ctx.createGain();
+  const filter = ctx.createBiquadFilter();
 
   osc1.type = 'sine';
   osc2.type = 'triangle';
   
   // High-tech chord sweep
-  osc1.frequency.setValueAtTime(440, audioCtx.currentTime); 
-  osc1.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 1.5); 
+  osc1.frequency.setValueAtTime(440, ctx.currentTime); 
+  osc1.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 1.5); 
   
-  osc2.frequency.setValueAtTime(554.37, audioCtx.currentTime); 
-  osc2.frequency.exponentialRampToValueAtTime(1108.73, audioCtx.currentTime + 1.5); 
+  osc2.frequency.setValueAtTime(554.37, ctx.currentTime); 
+  osc2.frequency.exponentialRampToValueAtTime(1108.73, ctx.currentTime + 1.5); 
 
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(2000, audioCtx.currentTime);
-  filter.frequency.exponentialRampToValueAtTime(400, audioCtx.currentTime + 2);
+  filter.frequency.setValueAtTime(2000, ctx.currentTime);
+  filter.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 2);
 
-  gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-  gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.1);
-  gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 2);
+  gainNode.gain.setValueAtTime(0, ctx.currentTime);
+  gainNode.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.1);
+  gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2);
 
   osc1.connect(filter);
   osc2.connect(filter);
   filter.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
+  gainNode.connect(ctx.destination);
 
   osc1.start();
   osc2.start();
-  osc1.stop(audioCtx.currentTime + 2);
-  osc2.stop(audioCtx.currentTime + 2);
+  osc1.stop(ctx.currentTime + 2);
+  osc2.stop(ctx.currentTime + 2);
 }
 
 export function playClickSound() {
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') {
+    ctx.resume();
   }
   
-  const osc = audioCtx.createOscillator();
-  const gainNode = audioCtx.createGain();
+  const osc = ctx.createOscillator();
+  const gainNode = ctx.createGain();
 
   osc.type = 'square';
   // Sharp mechanical click drop
-  osc.frequency.setValueAtTime(800, audioCtx.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.05);
+  osc.frequency.setValueAtTime(800, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.05);
 
-  gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime);
-  gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+  gainNode.gain.setValueAtTime(0.05, ctx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
 
   osc.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
+  gainNode.connect(ctx.destination);
 
   osc.start();
-  osc.stop(audioCtx.currentTime + 0.05);
+  osc.stop(ctx.currentTime + 0.05);
 }

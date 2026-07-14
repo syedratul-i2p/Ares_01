@@ -3,7 +3,7 @@
  * Handles all real-time communication between the dashboard and rover.
  *
  * Firebase Realtime Database schema:
- *   ares01/
+ *   ares_01/
  *     drive/direction          — "FORWARD" | "BACKWARD" | "LEFT" | "RIGHT" | "STOP"
  *     arm/angles               — { base, shoulder, elbow, wrist, gripper } (0–180)
  *     autonomous/action        — { command, raw, timestamp, language }
@@ -65,7 +65,7 @@ export async function setDriveDirection(direction: DriveDirection): Promise<void
     return;
   }
 
-  const r = dbRef("ares01/drive/direction");
+  const r = dbRef("ares_01/commands/current_action");
   if (!r) return;
 
   lastDriveDirection = direction;
@@ -74,7 +74,13 @@ export async function setDriveDirection(direction: DriveDirection): Promise<void
   if (driveDebounce) clearTimeout(driveDebounce);
   driveDebounce = setTimeout(async () => {
     try {
-      await set(r, direction);
+      const payload = JSON.stringify({
+        type: "drive",
+        command: direction,
+        speed: 200,
+        timestamp: Date.now()
+      });
+      await set(r, payload);
     } catch (err) {
       console.warn("[ARES-01] Drive write failed:", err);
       // Reset cache on error to allow retries
@@ -99,7 +105,7 @@ let armThrottleTimeout: ReturnType<typeof setTimeout> | null = null;
 const ARM_THROTTLE_LIMIT_MS = 50; // 20Hz max frequency for ESP32/PCA9685 loop
 
 export async function setArmAngles(angles: ArmAngles): Promise<void> {
-  const r = dbRef("ares01/arm/angles");
+  const r = dbRef("ares_01/commands/current_action");
   if (!r) return;
 
   const now = Date.now();
@@ -108,7 +114,12 @@ export async function setArmAngles(angles: ArmAngles): Promise<void> {
   const performWrite = async (anglesToWrite: ArmAngles) => {
     lastArmWriteTime = Date.now();
     try {
-      await set(r, anglesToWrite);
+      const payload = JSON.stringify({
+        type: "arm_raw",
+        angles: anglesToWrite,
+        timestamp: Date.now()
+      });
+      await set(r, payload);
     } catch (err) {
       console.warn("[ARES-01] Arm write failed:", err);
     }
@@ -149,23 +160,41 @@ export interface AutonomousAction {
 }
 
 export async function sendAutonomousCommand(action: AutonomousAction): Promise<void> {
-  const r = dbRef("ares01/autonomous/action");
+  const r = dbRef("ares_01/commands/current_action");
   if (!r) {
     console.log("[ARES-01][FIREBASE-STUB] Autonomous action:", action);
     return;
   }
   try {
-    await set(r, action);
+    const payload = JSON.stringify({
+      type: "autonomous",
+      ...action,
+      timestamp: action.timestamp || Date.now()
+    });
+    await set(r, payload);
   } catch (err) {
     console.warn("[ARES-01] Autonomous write failed:", err);
+  }
+}
+
+export async function setNavigationMode(mode: "MANUAL" | "AUTONOMOUS"): Promise<void> {
+  const r = dbRef("ares_01/config/navigation_mode");
+  if (!r) {
+    console.log(`[ARES-01][FIREBASE-STUB] Navigation Mode: ${mode}`);
+    return;
+  }
+  try {
+    await set(r, mode);
+  } catch (err) {
+    console.warn("[ARES-01] Navigation Mode write failed:", err);
   }
 }
 
 // ─── Telemetry Listeners ──────────────────────────────────────────────────────
 
 export interface Telemetry {
-  distance: number;
-  solar: number;
+  obstacle_distance: number;
+  battery_percentage: number;
   motor_temp: number;
   rssi: number;
 }
@@ -187,9 +216,9 @@ export function subscribeTelemetry(
   }
 
   // Individual telemetry fields
-  const fields: (keyof Telemetry)[] = ["distance", "solar", "motor_temp", "rssi"];
+  const fields: (keyof Telemetry)[] = ["obstacle_distance", "battery_percentage", "motor_temp", "rssi"];
   fields.forEach(field => {
-    const r = ref(db!, `ares01/telemetry/${field}`);
+    const r = ref(db!, `ares_01/telemetry/${field}`);
     activeListeners.push(r);
     onValue(r, snapshot => {
       const val = snapshot.val();
@@ -204,7 +233,7 @@ export function subscribeTelemetry(
   });
 
   // Heartbeat: rover must update this timestamp every ~1–2s
-  const hbRef = ref(db, "ares01/telemetry/heartbeat");
+  const hbRef = ref(db, "ares_01/telemetry/heartbeat");
   activeListeners.push(hbRef);
 
   const resetHeartbeatTimer = () => {
@@ -237,7 +266,7 @@ export function subscribeTelemetry(
 // ─── Config & System Actions ──────────────────────────────────────────────────
 
 export async function setMaxSpeed(speed: number): Promise<void> {
-  const r = dbRef("ares01/config/maxSpeed");
+  const r = dbRef("ares_01/config/maxSpeed");
   if (!r) return;
   try {
     await set(r, speed);
@@ -247,7 +276,7 @@ export async function setMaxSpeed(speed: number): Promise<void> {
 }
 
 export async function triggerReboot(): Promise<void> {
-  const r = dbRef("ares01/system/reboot");
+  const r = dbRef("ares_01/system/reboot");
   if (!r) return;
   try {
     await set(r, true);
@@ -257,7 +286,7 @@ export async function triggerReboot(): Promise<void> {
 }
 
 export async function setFirebaseControlMode(mode: string): Promise<void> {
-  const r = dbRef("ares01/mode");
+  const r = dbRef("ares_01/mode");
   if (!r) return;
   try {
     await set(r, mode.toUpperCase());
@@ -267,7 +296,7 @@ export async function setFirebaseControlMode(mode: string): Promise<void> {
 }
 
 export async function setFirebaseLanguage(language: string): Promise<void> {
-  const r = dbRef("ares01/config/language");
+  const r = dbRef("ares_01/config/language");
   if (!r) return;
   try {
     await set(r, language);
@@ -277,7 +306,7 @@ export async function setFirebaseLanguage(language: string): Promise<void> {
 }
 
 export async function writePingRTT(timestamp: number): Promise<void> {
-  const r = dbRef("ares01/system/ping_test");
+  const r = dbRef("ares_01/system/ping_test");
   if (!r) return;
   await set(r, timestamp);
 }
@@ -297,7 +326,7 @@ let missionStatusThrottle: ReturnType<typeof setTimeout> | null = null;
 let pendingMissionStatus: any = null;
 
 export async function syncMissionStatus(status: { mode: string, ping: number | null, battery: number | null }): Promise<void> {
-  const r = dbRef("ares01/mission_status");
+  const r = dbRef("ares_01/mission_status");
   if (!r) return;
 
   pendingMissionStatus = status;
@@ -316,7 +345,7 @@ export async function syncMissionStatus(status: { mode: string, ping: number | n
 }
 
 export async function appendCommandLog(log: { raw_text: string, parsed_intent: string, timestamp: number }): Promise<void> {
-  const r = dbRef("ares01/command_logs");
+  const r = dbRef("ares_01/command_logs");
   if (!r) return;
   try {
     const newLogRef = push(r);
