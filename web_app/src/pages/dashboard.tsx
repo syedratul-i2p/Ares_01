@@ -62,6 +62,28 @@ const CONTROL_TABS: { id: ControlMode; label: string; icon: React.ElementType }[
   { id: "voice",  label: "Voice Command",  icon: Mic      },
 ];
 
+const renderLogLine = (log: string) => {
+  return <div className="py-0.5">{log}</div>;
+};
+
+const sendCommandViaHttp = async (ip: string, payload: any) => {
+  if (!ip) return;
+  try {
+    let url = ip.trim();
+    if (!url.startsWith("http")) url = `http://${url}`;
+    const endpoint = url.endsWith("/command") ? url : `${url}/command`;
+    
+    await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  } catch (err) {
+    console.error("HTTP Command Error:", err);
+    throw err;
+  }
+};
+
 const JOINT_CONFIG = {
   base:     { label: "Base",     color: "hsl(243, 75%, 59%)", accentClass: "text-primary",   dotClass: "bg-primary"   },
   shoulder: { label: "Shoulder", color: "hsl(243, 75%, 59%)", accentClass: "text-primary",   dotClass: "bg-primary"   },
@@ -99,6 +121,8 @@ interface HeaderProps {
   setTheme: (theme: any) => void;
   ping: number | null;
   batteryPct: number;
+  roverMode: "MANUAL" | "AUTONOMOUS";
+  onToggleRoverMode: (mode: "MANUAL" | "AUTONOMOUS") => void;
 }
 
 const Header = React.memo(function Header({
@@ -109,7 +133,9 @@ const Header = React.memo(function Header({
   theme,
   setTheme,
   ping,
-  batteryPct
+  batteryPct,
+  roverMode,
+  onToggleRoverMode
 }: HeaderProps) {
   return (
     <header data-tauri-drag-region className="h-16 shrink-0 flex items-center justify-between px-5 border-b border-border/60 bg-white dark:bg-white/[0.03] backdrop-blur-xl z-20 shadow-sm dark:shadow-none select-none">
@@ -164,7 +190,7 @@ const Header = React.memo(function Header({
           </span>
           <ToggleSwitch 
             checked={roverMode === "AUTONOMOUS"} 
-            onChange={(checked) => handleRoverModeToggle(checked ? "AUTONOMOUS" : "MANUAL")} 
+            onChange={(checked) => onToggleRoverMode(checked ? "AUTONOMOUS" : "MANUAL")} 
           />
         </div>
         <Button variant={showSettings ? "secondary" : "ghost"} size="icon" className="h-8 w-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
@@ -194,7 +220,6 @@ const Header = React.memo(function Header({
 interface SettingsPanelProps {
   showSettings: boolean;
   setShowSettings: (val: boolean) => void;
-  fbStatus: "ready" | "not-configured";
   roverOnline: boolean;
   roverIp: string;
   setRoverIp: (val: string) => void;
@@ -202,6 +227,8 @@ interface SettingsPanelProps {
   streamError: boolean;
   handleConnectCamera: () => void;
   handleDisconnectCamera: () => void;
+  commandUrl: string;
+  setCommandUrl: (val: string) => void;
   ping: number | null;
   rebooting: boolean;
   handleReboot: () => void;
@@ -220,7 +247,6 @@ const ToggleSwitch = ({ checked, onChange }: { checked: boolean, onChange: (c: b
 const SettingsPanel = React.memo(function SettingsPanel({
   showSettings,
   setShowSettings,
-  fbStatus,
   roverOnline,
   roverIp,
   setRoverIp,
@@ -228,11 +254,8 @@ const SettingsPanel = React.memo(function SettingsPanel({
   streamError,
   handleConnectCamera,
   handleDisconnectCamera,
-  wsUrl,
-  setWsUrl,
-  roverConnectionStatus,
-  handleConnectWs,
-  handleDisconnectWs,
+  commandUrl,
+  setCommandUrl,
   ping,
   rebooting,
   handleReboot,
@@ -294,27 +317,16 @@ const SettingsPanel = React.memo(function SettingsPanel({
             {/* Settings Body */}
             <div className="p-4 space-y-4 overflow-y-auto min-h-0 select-none">
               
-              {/* Row 1: Firebase Link & Heartbeat */}
+              {/* Row 1.2: Rover Connection Status */}
               <div className="flex items-center justify-between py-1.5 border-b border-black/[0.05] dark:border-white/[0.06]">
                 <div className="flex items-center gap-2.5">
                   <Database className="w-4 h-4 text-primary dark:text-primary shrink-0" />
                   <div className="flex flex-col">
-                    <span className="text-xs font-semibold text-slate-900 dark:text-white/90">Firebase Connection</span>
-                    <span className="text-[9px] text-slate-500 dark:text-white/40">Realtime database status & active latency</span>
+                    <span className="text-xs font-semibold text-slate-900 dark:text-white/90">Rover System Status</span>
+                    <span className="text-[9px] text-slate-500 dark:text-white/40">Active telemetry connection status</span>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <Badge
-                    variant="outline"
-                    className={`text-[9px] h-4.5 font-mono ${
-                      fbStatus === "ready"
-                        ? "bg-primary/10 text-primary dark:text-primary border-primary/20"
-                        : "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
-                    }`}
-                  >
-                    <span className={`w-1 h-1 rounded-full mr-1 ${fbStatus === "ready" ? "bg-primary dark:bg-primary" : "bg-red-500"}`} />
-                    {fbStatus === "ready" ? `Live ${ping !== null ? `(${ping}ms)` : ""}` : "Not Configured"}
-                  </Badge>
                   <Badge
                     variant="outline"
                     className={`text-[9px] h-4.5 font-mono ${
@@ -384,11 +396,11 @@ const SettingsPanel = React.memo(function SettingsPanel({
                 </div>
               </div>
 
-              {/* Connections (ESP32-CAM and WS) */}
+              {/* Connections (ESP32-CAM and Command) */}
               <div className="space-y-2.5 pt-1">
                 <span className="text-[10px] font-bold text-[#A0A0A0] uppercase tracking-wider">Hardware Connections</span>
                 
-                {/* ESP32-CAM */}
+                {/* ESP32-CAM Stream Host */}
                 <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-transparent hover:bg-slate-50 dark:hover:bg-[rgba(255,255,255,0.02)] border border-transparent hover:border-slate-200 dark:hover:border-[#333] transition-colors">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-semibold text-slate-900 dark:text-[#E0E0E0]">ESP32-CAM Stream Host</span>
@@ -400,7 +412,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                     <input
                       type="text"
                       className="h-6 text-[10px] bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
-                      placeholder="192.168.1.100"
+                      placeholder="172.30.43.196/stream"
                       value={roverIp}
                       onChange={e => setRoverIp(e.target.value)}
                       onKeyDown={e => e.key === "Enter" && handleConnectCamera()}
@@ -422,23 +434,21 @@ const SettingsPanel = React.memo(function SettingsPanel({
                       </button>
                     )}
                   </div>
-                  
-                  {/* Modern Camera Configuration Section */}
-                  <div className="flex items-center gap-2 mt-1.5 pt-1.5 border-t border-black/5 dark:border-[#333]">
-                    <div className="flex-1 flex items-center gap-1.5 bg-slate-100 dark:bg-black/20 rounded-md px-2 py-1 border border-transparent dark:border-[#333]">
-                      <select className="bg-transparent text-[10px] text-slate-700 dark:text-[#E0E0E0] font-mono outline-none w-full appearance-none cursor-pointer">
-                        <option value="1080p">1080p HD</option>
-                        <option value="720p">720p</option>
-                        <option value="480p">480p</option>
-                      </select>
-                    </div>
-                    <div className="flex-1 flex items-center gap-1.5 bg-slate-100 dark:bg-black/20 rounded-md px-2 py-1 border border-transparent dark:border-[#333]">
-                      <select className="bg-transparent text-[10px] text-slate-700 dark:text-[#E0E0E0] font-mono outline-none w-full appearance-none cursor-pointer">
-                        <option value="60">60 FPS</option>
-                        <option value="30">30 FPS</option>
-                        <option value="15">15 FPS</option>
-                      </select>
-                    </div>
+                </div>
+
+                {/* HTTP Command Endpoint */}
+                <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-transparent hover:bg-slate-50 dark:hover:bg-[rgba(255,255,255,0.02)] border border-transparent hover:border-slate-200 dark:hover:border-[#333] transition-colors">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-slate-900 dark:text-[#E0E0E0]">Rover Command Endpoint (HTTP)</span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2 sm:gap-1.5">
+                    <input
+                      type="text"
+                      className="h-6 text-[10px] bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
+                      placeholder="172.30.43.196"
+                      value={commandUrl}
+                      onChange={e => setCommandUrl(e.target.value)}
+                    />
                   </div>
                 </div>
               </div>
@@ -492,6 +502,47 @@ const CameraView = React.memo(function CameraView({
   distance,
   setStreamError
 }: CameraViewProps) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!streamSrc) return;
+    let isActive = true;
+    let timeoutId: any;
+
+    const fetchFrame = async () => {
+      try {
+        const captureUrl = streamSrc.replace('/stream', '/capture');
+        const res = await fetch(captureUrl, { cache: 'no-store' });
+        if (!res.ok) throw new Error("Network response was not ok");
+        const blob = await res.blob();
+        if (!isActive) return;
+        const objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(prev => {
+          if (prev) URL.revokeObjectURL(prev);
+          return objectUrl;
+        });
+        setStreamError(false);
+      } catch (e) {
+        if (!isActive) return;
+        setStreamError(true);
+      }
+      if (isActive) {
+        timeoutId = setTimeout(fetchFrame, 100);
+      }
+    };
+
+    fetchFrame();
+
+    return () => {
+      isActive = false;
+      clearTimeout(timeoutId);
+      setBlobUrl(prev => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+    };
+  }, [streamSrc, setStreamError]);
+
   return (
     <div
       className="w-full h-full relative bg-black/60 backdrop-blur-md overflow-hidden flex items-center justify-center pointer-events-none select-none"
@@ -500,12 +551,12 @@ const CameraView = React.memo(function CameraView({
         willChange: "transform"
       }}
     >
-      {streamSrc && !streamError ? (
+      {streamSrc && !streamError && blobUrl ? (
         <img
           id="rover-video-stream"
-          src={streamSrc}
+          src={blobUrl}
           alt="ARES-01 live feed"
-          className="w-full h-auto object-cover sm:max-h-full sm:object-contain aspect-video rounded-xl sm:rounded-none transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
+          className="w-full h-full object-contain aspect-video rounded-xl sm:rounded-none transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
           onError={() => {
             setStreamError(true);
             console.warn(`[ARES-01] Camera stream error at ${streamSrc}`);
@@ -541,6 +592,7 @@ const CameraView = React.memo(function CameraView({
           </div>
         </>
       )}
+
       <div className="absolute top-3 left-3 flex items-center gap-2 pointer-events-none">
         <div className={`flex items-center gap-1.5 bg-black/55 backdrop-blur-md border border-white/10 rounded-md px-2.5 py-1 transition-all duration-500 ${streamSrc && !streamError ? "border-green-500/30" : ""}`}>
           <span className={`w-1.5 h-1.5 rounded-full transition-colors duration-500 ${streamSrc && !streamError ? "bg-green-400 animate-pulse" : "bg-white/30"}`} />
@@ -981,12 +1033,12 @@ export default function Dashboard() {
   // ── Network / Connection State
   const [roverConnectionStatus, setRoverConnectionStatus] = useState<RoverConnectionStatus>("disconnected");
   const [ping, setPing] = useState<number | null>(null);
-  const [wsUrl, setWsUrl] = useState("");
+  const [commandUrl, setCommandUrl] = useState("172.30.43.196");
   const [showSettings, setShowSettings] = useState(false);
   const [roverMode, setRoverMode] = useState<"MANUAL" | "AUTONOMOUS">("MANUAL");
 
   // ── Camera Stream State (Moved up for hook dependency array)
-  const [roverIp, setRoverIp] = useState("192.168.4.1");
+  const [roverIp, setRoverIp] = useState("172.30.43.196/stream");
   const [streamSrc, setStreamSrc] = useState<string | null>(null);
   const [streamError, setStreamError] = useState(false);
 
@@ -1081,20 +1133,29 @@ export default function Dashboard() {
 
   const handleCapturePhoto = useCallback(async () => {
     try {
-      if (!roverIp) {
-        console.warn(`${LOG} Cannot capture: No Rover IP configured.`);
-        toast.error("⚠️ Capture Failed: No Rover IP Configured");
+      const img = document.getElementById('rover-video-stream') as HTMLImageElement;
+      if (!img) {
+        toast.error("⚠️ Capture Failed: No video stream active");
         return;
       }
-      console.log(`${LOG} Requesting photo capture from ${roverIp}...`);
-      const savedPath = await invoke<string>("capture_photo", { ip: roverIp });
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || 800;
+      canvas.height = img.naturalHeight || 600;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const base64Data = canvas.toDataURL("image/jpeg");
+      
+      console.log(`${LOG} Requesting photo capture via Tauri IPC...`);
+      const savedPath = await invoke<string>("save_screenshot_command", { rawData: base64Data });
       console.log(`${LOG} Photo successfully captured and saved to: ${savedPath}`);
       toast.success(`📸 Media Saved: ${savedPath}`);
     } catch (err) {
       console.error(`${LOG} Failed to capture photo:`, err);
       toast.error(`⚠️ Capture Failed: ${err}`);
     }
-  }, [roverIp]);
+  }, []);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -1138,20 +1199,23 @@ export default function Dashboard() {
       }
     };
     
-    recorder.onstop = () => {
+    recorder.onstop = async () => {
       cancelAnimationFrame(reqFrameRef.current);
       if (recordedChunksRef.current.length === 0) return;
-      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
       
-      const a = document.createElement('a');
-      a.href = url;
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      a.download = `ARES-01_Video_${timestamp}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      try {
+        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+        const arrayBuffer = await blob.arrayBuffer();
+        const videoBytes = Array.from(new Uint8Array(arrayBuffer));
+        
+        console.log(`${LOG} Requesting video save via Tauri IPC...`);
+        const savedPath = await invoke<string>("save_video_command", { videoBytes });
+        console.log(`${LOG} Video successfully saved to: ${savedPath}`);
+        toast.success(`🎥 Video Saved: ${savedPath}`);
+      } catch (err) {
+        console.error(`${LOG} Failed to save video:`, err);
+        toast.error(`⚠️ Video Save Failed: ${err}`);
+      }
     };
 
     recorder.start();
@@ -1245,27 +1309,27 @@ export default function Dashboard() {
     const fbDir = dir.toUpperCase() as DriveDirection;
     setDriveDirection(fbDir);
     try {
-      if (roverIp) {
-        await invoke("send_drive_command", { ip: roverIp, direction: fbDir });
+      if (commandUrl) {
+        await sendCommandViaHttp(commandUrl, { type: "drive", command: fbDir, speed: 200 });
       }
     } catch (err) {
-      console.error("IPC Drive Error:", err);
+      console.error("HTTP Drive Error:", err);
       toast.error(`Drive Error: ${err}`);
     }
-  }, [roverIp]);
+  }, [commandUrl]);
 
   const handleDirectionRelease = useCallback(async () => {
     setActiveDirection(null);
     setDriveDirection("STOP");
     try {
-      if (roverIp) {
-        await invoke("send_drive_command", { ip: roverIp, direction: "STOP" });
+      if (commandUrl) {
+        await sendCommandViaHttp(commandUrl, { type: "drive", command: "STOP", speed: 200 });
       }
     } catch (err) {
-      console.error("IPC Drive Error:", err);
+      console.error("HTTP Drive Error:", err);
       toast.error(`Drive Error: ${err}`);
     }
-  }, [roverIp]);
+  }, [commandUrl]);
 
   const handleStop = useCallback(() => {
     setActiveDirection(null);
@@ -1478,16 +1542,16 @@ export default function Dashboard() {
 
   const handleResetArm = useCallback(() => {
     animateJointsTo(DEFAULT_JOINTS, "Home (reset)");
-    if (roverIp) invoke("send_arm_command", { ip: roverIp, command: "HOME" }).catch(e => { console.error(e); toast.error(String(e)); });
-  }, [animateJointsTo, roverIp]);
+    if (commandUrl) sendCommandViaHttp(commandUrl, { type: "arm_macro", command: "HOME" }).catch(e => { console.error(e); toast.error(String(e)); });
+  }, [animateJointsTo, commandUrl]);
 
   const applyPreset = useCallback((p: typeof ARM_PRESETS[0]) => {
     animateJointsTo(p.joints, `Preset: ${p.name}`);
-    if (roverIp) {
+    if (commandUrl) {
       const macroCmd = p.name.toUpperCase();
-      invoke("send_arm_command", { ip: roverIp, command: macroCmd }).catch(e => { console.error(e); toast.error(String(e)); });
+      sendCommandViaHttp(commandUrl, { type: "arm_macro", command: macroCmd }).catch(e => { console.error(e); toast.error(String(e)); });
     }
-  }, [animateJointsTo, roverIp]);
+  }, [animateJointsTo, commandUrl]);
 
   const [stepSize, setStepSize] = useState<1 | 5 | 15>(5);
   const [editingJoint, setEditingJoint] = useState<keyof ArmAngles | null>(null);
@@ -1632,8 +1696,8 @@ RULES:
             if (validDrive.includes(cmd)) {
               pipelineTasks.push(`[${timestamp}] [NAV] AI Propulsion → ${cmd}`);
               setDriveDirection(cmd as DriveDirection);
-              if (roverIp) {
-                try { await invoke("send_drive_command", { ip: roverIp, direction: cmd }); }
+              if (commandUrl) {
+                try { await sendCommandViaHttp(commandUrl, { type: "drive", command: cmd, speed: 200 }); }
                 catch (e) { console.error(e); toast.error(String(e)); }
               }
               if (cmd === "STOP") setAiTaskState("idle");
@@ -1649,8 +1713,8 @@ RULES:
               } else if (cmd === "HOME") {
                 setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
               }
-              if (roverIp) {
-                try { await invoke("send_arm_command", { ip: roverIp, command: cmd }); }
+              if (commandUrl) {
+                try { await sendCommandViaHttp(commandUrl, { type: "arm_macro", command: cmd }); }
                 catch (e) { console.error(e); toast.error(String(e)); }
               }
             }
@@ -1690,7 +1754,7 @@ RULES:
     }
 
     setIsProcessing(false);
-  }, [directiveInput, isProcessing, roverIp]);
+  }, [directiveInput, isProcessing, commandUrl]);
 
   // ── Local Keyword Fallback (used when Gemini is unavailable) ─────────────
   const executeLocalKeywordFallback = useCallback((text: string, timestamp: string, pipelineTasks: string[]) => {
@@ -1706,23 +1770,23 @@ RULES:
     if (['সাম', 'আগা', 'এগি', 'forw', 'ahead', 'go'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: FORWARD.`);
       setDriveDirection("FORWARD");
-      if (roverIp) invoke("send_drive_command", { ip: roverIp, direction: "FORWARD" }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "drive", command: "FORWARD", speed: 200 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['পিছ', 'পেছ', 'পিছা', 'back', 'rev'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: BACKWARD.`);
       setDriveDirection("BACKWARD");
-      if (roverIp) invoke("send_drive_command", { ip: roverIp, direction: "BACKWARD" }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "drive", command: "BACKWARD", speed: 200 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['বামে', 'বাম', 'left'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: LEFT.`);
       setDriveDirection("LEFT");
-      if (roverIp) invoke("send_drive_command", { ip: roverIp, direction: "LEFT" }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "drive", command: "LEFT", speed: 200 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['ডানে', 'ডান', 'right'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: RIGHT.`);
       setDriveDirection("RIGHT");
-      if (roverIp) invoke("send_drive_command", { ip: roverIp, direction: "RIGHT" }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "drive", command: "RIGHT", speed: 200 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['থামো', 'দাঁড়াও', 'stop', 'halt', 'break'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system halted: STOP.`);
       setDriveDirection("STOP");
-      if (roverIp) invoke("send_drive_command", { ip: roverIp, direction: "STOP" }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "drive", command: "STOP", speed: 200 }).catch(e => { console.error(e); toast.error(String(e)); });
       setAiTaskState("idle");
     }
 
@@ -1735,15 +1799,15 @@ RULES:
     if (['তোল', 'তুল', 'উঠ', 'ওঠ', 'নাও', 'ধর', 'pick', 'grab'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [ARM] Inverse kinematics matrix resolved. Actuating manipulator: PICKUP.`);
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
-      if (roverIp) invoke("send_arm_command", { ip: roverIp, command: "PICKUP" }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "arm_macro", command: "PICKUP" }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['ছাড', 'ছাড়', 'নামা', 'ফেল', 'drop', 'releas'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
       setJoints(prev => ({ ...prev, gripper: 0 }));
-      if (roverIp) invoke("send_arm_command", { ip: roverIp, command: "DROP" }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "arm_macro", command: "DROP" }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'home', 'reset'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
-      if (roverIp) invoke("send_arm_command", { ip: roverIp, command: "HOME" }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "arm_macro", command: "HOME" }).catch(e => { console.error(e); toast.error(String(e)); });
     }
 
     // Status
@@ -1752,7 +1816,7 @@ RULES:
     } else {
       pipelineTasks.push(`[${timestamp}] [SYS] Warning: Unrecognized telemetry token. Awaiting operator override.`);
     }
-  }, [roverIp]);
+  }, [commandUrl]);
 
 
 
@@ -2048,7 +2112,6 @@ RULES:
       <SettingsPanel
         showSettings={showSettings}
         setShowSettings={setShowSettings}
-        fbStatus={fbStatus}
         roverOnline={roverOnline}
         roverIp={roverIp}
         setRoverIp={setRoverIp}
@@ -2056,11 +2119,8 @@ RULES:
         streamError={streamError}
         handleConnectCamera={handleConnectCamera}
         handleDisconnectCamera={handleDisconnectCamera}
-        wsUrl={wsUrl}
-        setWsUrl={setWsUrl}
-        roverConnectionStatus={roverConnectionStatus}
-        handleConnectWs={handleConnectWs}
-        handleDisconnectWs={handleDisconnectWs}
+        commandUrl={commandUrl}
+        setCommandUrl={setCommandUrl}
         ping={ping}
         rebooting={rebooting}
         handleReboot={handleReboot}
@@ -2378,6 +2438,7 @@ RULES:
                         </div>
                       </div>
 
+
                       <div className="flex gap-2">
                         <input ref={commandInputRef} type="text" inputMode="text" autoComplete="off"
                           placeholder="e.g., 'Initiate pick up sequence'"
@@ -2469,6 +2530,7 @@ RULES:
                           <option value="en-US">English</option>
                         </select>
                       </div>
+
 
                       {/* Concentric Pulsing Microphone Container */}
                       <div className="relative flex items-center justify-center w-24 h-24 my-2">

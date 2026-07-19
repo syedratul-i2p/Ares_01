@@ -40,13 +40,15 @@ class _DualBrainDashboardState extends State<DualBrainDashboard> {
   StreamSubscription? _offlineTelemetrySub;
   
   // Local MJPEG Stream
-  final String _localMjpegStream = "http://192.168.4.1:80";
+  String _localMjpegStream = "http://172.30.43.196:80/stream";
+  String _localCommandHost = "172.30.43.196";
   bool _isLocalAiProcessing = false;
   Timer? _localAiTimer;
   
   // AI Commander State
   final TextEditingController _aiCommandController = TextEditingController();
   bool _isAiProcessing = false;
+  String userInstruction = "";
 
   // Debounce Timer for Manual Controls
   Timer? _debounceTimer;
@@ -94,7 +96,7 @@ class _DualBrainDashboardState extends State<DualBrainDashboard> {
         
         try {
           // Fetch one raw frame from the local capture endpoint
-          final response = await http.get(Uri.parse('http://192.168.4.1/capture'));
+          final response = await http.get(Uri.parse('http://172.30.43.196:80/capture'));
           
           if (response.statusCode == 200) {
             await _offlineService.runEdgeVisionProcessing(response.bodyBytes);
@@ -118,7 +120,7 @@ class _DualBrainDashboardState extends State<DualBrainDashboard> {
       });
 
       // Poll Firebase Storage
-      _frameTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) async {
+      _frameTimer = Timer.periodic(const Duration(milliseconds: 3000), (timer) async {
         final url = await _firebaseService.getLiveFrameUrl();
         if (url.isNotEmpty && url != _liveFrameUrl && mounted) {
           setState(() => _liveFrameUrl = url);
@@ -151,12 +153,17 @@ class _DualBrainDashboardState extends State<DualBrainDashboard> {
 
     if (isAutonomous) {
       _visionTimer?.cancel();
-      _visionTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
-        if (_liveFrameUrl.isNotEmpty) {
-          final instruction = _aiCommandController.text.trim().isNotEmpty 
-              ? _aiCommandController.text.trim() 
-              : "Navigate safely and avoid obstacles";
-          AIService().processVisionCommand(instruction, _liveFrameUrl);
+      _visionTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+        if (!_isAiProcessing && _liveFrameUrl.isNotEmpty) {
+          _isAiProcessing = true;
+          try {
+            final instruction = userInstruction.isNotEmpty 
+                ? userInstruction 
+                : "Navigate safely and avoid obstacles";
+            await AIService().processVisionCommand(instruction, _liveFrameUrl);
+          } finally {
+            _isAiProcessing = false;
+          }
         }
       });
     } else {
@@ -174,6 +181,68 @@ class _DualBrainDashboardState extends State<DualBrainDashboard> {
         _firebaseService.sendCommand('drive', command, speed: 200);
       }
     });
+  }
+
+  void _showSettingsDialog() {
+    final TextEditingController streamHostController = TextEditingController(text: _localMjpegStream.replaceAll("http://", ""));
+    final TextEditingController commandEndpointController = TextEditingController(text: _localCommandHost);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          title: const Text("System Settings", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: streamHostController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: "Stream Host",
+                  labelStyle: TextStyle(color: Colors.white70),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.cyan)),
+                  hintText: "172.30.43.196:80/stream",
+                  hintStyle: TextStyle(color: Colors.white24)
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: commandEndpointController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: "Rover Command Endpoint (HTTP)",
+                  labelStyle: TextStyle(color: Colors.white70),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.cyan)),
+                  hintText: "172.30.43.196",
+                  hintStyle: TextStyle(color: Colors.white24)
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel", style: TextStyle(color: Colors.white54)),
+            ),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _localMjpegStream = "http://${streamHostController.text.trim()}";
+                  _localCommandHost = commandEndpointController.text.trim();
+                });
+                _offlineService.setEspUrl(_localCommandHost);
+                Navigator.pop(context);
+              },
+              child: const Text("Save", style: TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _sendArmCommand() {
@@ -200,6 +269,43 @@ class _DualBrainDashboardState extends State<DualBrainDashboard> {
   }
 
   // AI Execute Helper
+  void _handleAiSubmit([String? voiceInput]) {
+    String text = voiceInput ?? _aiCommandController.text.trim();
+    if (text.isEmpty) return;
+    
+    String lowerText = text.toLowerCase();
+    
+    // Keyword Interceptor
+    if (lowerText.contains("autonomous") || lowerText.contains("auto mode") || lowerText.contains("start auto")) {
+      _toggleRoverMode(true);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Switched to Autonomous Mode"), behavior: SnackBarBehavior.floating));
+      if (voiceInput == null) _aiCommandController.clear();
+      return;
+    }
+    if (lowerText.contains("manual") || lowerText.contains("manual mode") || lowerText.contains("stop auto")) {
+      _toggleRoverMode(false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Switched to Manual Mode"), behavior: SnackBarBehavior.floating));
+      if (voiceInput == null) _aiCommandController.clear();
+      return;
+    }
+
+    if (_currentMode == RoverMode.autonomous) {
+      setState(() {
+        userInstruction = text;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Autonomous vision target updated successfully."),
+          behavior: SnackBarBehavior.floating, // Optimal for both Windows and Mobile scaling
+        ),
+      );
+      if (voiceInput == null) _aiCommandController.clear();
+    } else {
+      if (voiceInput != null) _aiCommandController.text = text;
+      _executeAiScan();
+    }
+  }
+
   Future<void> _executeAiScan() async {
     final instruction = _aiCommandController.text.trim();
     if (instruction.isEmpty) return;
@@ -257,6 +363,11 @@ class _DualBrainDashboardState extends State<DualBrainDashboard> {
               Icon(Icons.bolt, color: _isOfflineMode ? Colors.amber : Colors.white24, size: 20),
             ],
           ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.settings, color: Colors.white70),
+            onPressed: _showSettingsDialog,
+          ),
           const SizedBox(width: 16),
           _buildTelemetryBadge(
             icon: Icons.battery_charging_full,
@@ -297,17 +408,30 @@ class _DualBrainDashboardState extends State<DualBrainDashboard> {
                       ],
                     )
                   else if (_isOfflineMode)
-                    // Offline Mode: Render Local MJPEG or static Image for demo
-                    // Since Flutter Web/Native handles MJPEG poorly without complex plugins, 
-                    // a placeholder image or a custom stream parser is used here.
-                    const Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.wifi_tethering, size: 64, color: Colors.amber),
-                        SizedBox(height: 16),
-                        Text("LOCAL AP STREAM ACTIVE", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
-                        Text("IP: 192.168.4.1", style: TextStyle(color: Colors.white54)),
-                      ],
+                    // Offline Mode: Render Local MJPEG stream from ESP32 via HTTP REST
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Image.network(
+                        _localMjpegStream,
+                        key: ValueKey(_localMjpegStream), 
+                        fit: BoxFit.contain,
+                        width: double.infinity,
+                        height: double.infinity,
+                        loadingBuilder: (context, child, progress) {
+                          if (progress == null) return child;
+                          return const Center(child: CircularProgressIndicator(color: Colors.amber));
+                        },
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.broken_image, size: 64, color: Colors.redAccent),
+                              SizedBox(height: 16),
+                              Text("STREAM ERROR", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                            ],
+                          );
+                        },
+                      ),
                     )
                   else
                     ClipRRect(
@@ -398,91 +522,133 @@ class _DualBrainDashboardState extends State<DualBrainDashboard> {
             ),
           ),
           
-          // AI COMMANDER
+          // AI DIRECTIVITY & VOICE COMMAND
           Expanded(
             flex: 1,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               decoration: const BoxDecoration(
                 border: Border(top: BorderSide(color: Colors.white12, width: 1)),
                 color: Color(0xFF1E293B),
               ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    _isOfflineMode ? "OFFLINE TFLITE EDGE ⚡" : "AI COMMANDER ☁️", 
-                    style: TextStyle(
-                      color: _isOfflineMode ? Colors.amber : Colors.cyanAccent, 
-                      letterSpacing: 2, 
-                      fontWeight: FontWeight.bold
-                    )
-                  ),
-                  const SizedBox(height: 12),
-                  if (_isOfflineMode)
-                    // Offline UI
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.memory, color: Colors.amber, size: 28),
-                        const SizedBox(width: 12),
-                        Text(
-                          _isLocalAiProcessing ? "Processing Frames..." : "TFLite Active",
-                          style: const TextStyle(color: Colors.white, fontSize: 16),
-                        ),
-                        if (_isLocalAiProcessing)
-                          const Padding(
-                            padding: EdgeInsets.only(left: 12),
-                            child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.amber, strokeWidth: 2)),
-                          )
-                      ],
-                    )
-                  else
-                    // Online UI
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _aiCommandController,
-                            style: const TextStyle(color: Colors.white),
-                            decoration: InputDecoration(
-                              hintText: "e.g., 'Find the red object and approach it'",
-                              hintStyle: const TextStyle(color: Colors.white30),
-                              filled: true,
-                              fillColor: Colors.black26,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide.none,
+              child: _isOfflineMode 
+                ? Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.memory, color: Colors.amber, size: 28),
+                      const SizedBox(width: 12),
+                      Text(
+                        _isLocalAiProcessing ? "Processing Frames..." : "TFLite Active",
+                        style: const TextStyle(color: Colors.white, fontSize: 16),
+                      ),
+                      if (_isLocalAiProcessing)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 12),
+                          child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.amber, strokeWidth: 2)),
+                        )
+                    ],
+                  )
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      bool isWide = constraints.maxWidth > 600;
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // AI DIRECTIVITY CARD
+                          Expanded(
+                            flex: isWide ? 1 : 2,
+                            child: Card(
+                              color: Colors.black26,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        const Text("AI DIRECTIVITY ☁️", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                                        _buildModeToggle(),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: TextField(
+                                            controller: _aiCommandController,
+                                            style: const TextStyle(color: Colors.white, fontSize: 12),
+                                            decoration: InputDecoration(
+                                              hintText: "e.g., 'Find the red object'",
+                                              hintStyle: const TextStyle(color: Colors.white30),
+                                              filled: true,
+                                              fillColor: Colors.black12,
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                            ),
+                                            onSubmitted: (_) => _handleAiSubmit(),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        GestureDetector(
+                                          onTap: _isAiProcessing ? null : () => _handleAiSubmit(),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(10),
+                                            decoration: BoxDecoration(color: Colors.cyan, borderRadius: BorderRadius.circular(8)),
+                                            child: _isAiProcessing 
+                                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
+                                              : const Icon(Icons.psychology, color: Colors.black, size: 20),
+                                          ),
+                                        )
+                                      ],
+                                    )
+                                  ],
+                                ),
                               ),
                             ),
-                            onSubmitted: (_) => _executeAiScan(),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        GestureDetector(
-                          onTap: _isAiProcessing ? null : _executeAiScan,
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 300),
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                            decoration: BoxDecoration(
-                              color: _isAiProcessing ? Colors.cyan.withOpacity(0.5) : Colors.cyan,
-                              borderRadius: BorderRadius.circular(8),
-                              boxShadow: _isAiProcessing 
-                                ? [BoxShadow(color: Colors.cyanAccent.withOpacity(0.8), blurRadius: 15, spreadRadius: 2)] 
-                                : [],
+                          if (isWide) const SizedBox(width: 8),
+                          // VOICE COMMAND CARD
+                          Expanded(
+                            flex: 1,
+                            child: Card(
+                              color: Colors.black26,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        const Text("VOICE COMMAND 🎤", style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                                        if (isWide) _buildModeToggle(),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.white12,
+                                        padding: const EdgeInsets.symmetric(vertical: 12),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                      onPressed: () {
+                                        // Simulating a voice keyword interception for testing
+                                        _handleAiSubmit("start auto");
+                                      },
+                                      icon: const Icon(Icons.mic, color: Colors.white, size: 20),
+                                      label: const Text("Hold to Speak", style: TextStyle(color: Colors.white, fontSize: 12)),
+                                    )
+                                  ],
+                                ),
+                              ),
                             ),
-                            child: _isAiProcessing 
-                              ? const SizedBox(
-                                  width: 20, height: 20, 
-                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                                )
-                              : const Icon(Icons.psychology, color: Colors.black, size: 24),
                           ),
-                        )
-                      ],
-                    ),
-                ],
-              ),
+                        ],
+                      );
+                    },
+                  ),
             ),
           )
         ],
@@ -558,6 +724,22 @@ class _DualBrainDashboardState extends State<DualBrainDashboard> {
           Text(text, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
         ],
       ),
+    );
+  }
+
+  Widget _buildModeToggle() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text("MANUAL", style: TextStyle(fontSize: 10, color: _currentMode == RoverMode.manual ? Colors.white : Colors.white30)),
+        Switch(
+          value: _currentMode == RoverMode.autonomous,
+          onChanged: _toggleRoverMode,
+          activeColor: Colors.greenAccent,
+          inactiveThumbColor: Colors.grey,
+        ),
+        Text("AUTO", style: TextStyle(fontSize: 10, color: _currentMode == RoverMode.autonomous ? Colors.greenAccent : Colors.white30)),
+      ],
     );
   }
 }

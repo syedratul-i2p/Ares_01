@@ -156,6 +156,7 @@ OUTPUT FORMAT:
               ]
             }
           ],
+          'response_format': {'type': 'json_object'},
           'temperature': 0.1,
           'max_tokens': 256,
         }),
@@ -178,10 +179,7 @@ OUTPUT FORMAT:
         final rawContent = choices[0]['message']?['content']?.trim() ?? '{}';
         debugPrint('[AIService] Groq Vision AI Response: $rawContent');
 
-        // Some models might wrap JSON in markdown block despite prompting. We clean it up manually.
-        final cleanContent = rawContent.replaceAll('```json', '').replaceAll('```', '').trim();
-
-        final parsed = jsonDecode(cleanContent);
+        final parsed = jsonDecode(rawContent);
         final actions = parsed['actions'] as List<dynamic>? ?? [];
         
         for (final action in actions) {

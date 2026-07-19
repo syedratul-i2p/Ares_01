@@ -49,7 +49,6 @@ private:
     unsigned long lastTelemetryTime = 0;
     unsigned long lastFrameTime = 0;
 
-    void initCamera();
     static void streamCallback(FirebaseStream data);
     static void streamTimeoutCallback(bool timeout);
     

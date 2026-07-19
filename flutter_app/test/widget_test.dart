@@ -4,9 +4,9 @@ import 'package:rover_control_app/main.dart';
 void main() {
   testWidgets('Rover Control Center smoke test', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const RoverApp());
+    await tester.pumpWidget(const AresDualBrainApp());
 
-    // Verify that the title 'Rover Control Center' is displayed.
-    expect(find.text('Rover Control Center'), findsOneWidget);
+    // Verify that the title 'ARES-01 DUAL-BRAIN' is displayed.
+    expect(find.text('ARES-01 DUAL-BRAIN'), findsOneWidget);
   });
 }

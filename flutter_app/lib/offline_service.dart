@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:tflite_flutter/tflite_flutter.dart';
 // Note: Requires the 'image' package in pubspec.yaml for frame manipulation
 
@@ -11,13 +12,14 @@ class OfflineService {
   factory OfflineService() => _instance;
   OfflineService._internal();
 
-  RawDatagramSocket? _udpSocket;
   Interpreter? _interpreter;
   bool _isInitialized = false;
 
-  final String _espApIp = '192.168.4.1';
-  final int _commandPort = 4210;
-  final int _telemetryPort = 4211;
+  String _espUrl = 'http://172.30.43.196:80';
+
+  void setEspUrl(String ip) {
+    _espUrl = 'http://$ip:80';
+  }
 
   final StreamController<Map<String, dynamic>> _telemetryController = StreamController.broadcast();
   Stream<Map<String, dynamic>> get telemetryStream => _telemetryController.stream;
@@ -25,30 +27,7 @@ class OfflineService {
   Future<void> initialize() async {
     if (_isInitialized) return;
 
-    // 1. Initialize UDP Listener for Telemetry
-    try {
-      _udpSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, _telemetryPort);
-      _udpSocket!.listen((RawSocketEvent event) {
-        if (event == RawSocketEvent.read) {
-          Datagram? datagram = _udpSocket!.receive();
-          if (datagram != null) {
-            String payload = utf8.decode(datagram.data);
-            try {
-              final data = jsonDecode(payload);
-              _telemetryController.add({
-                'battery_percentage': (data['battery_percentage'] ?? 0.0).toDouble(),
-                'obstacle_distance': (data['obstacle_distance'] ?? 999.9).toDouble(),
-              });
-            } catch (e) {
-              debugPrint("[OfflineService] UDP Parse Error: $e");
-            }
-          }
-        }
-      });
-      debugPrint("[OfflineService] UDP Telemetry Listener bound to port $_telemetryPort");
-    } catch (e) {
-      debugPrint("[OfflineService] Failed to bind UDP: $e");
-    }
+    // UDP Telemetry is deprecated in HTTP mode, telemetry will be handled elsewhere if needed.
 
     // 2. Initialize TFLite Edge Model
     try {
@@ -61,19 +40,28 @@ class OfflineService {
     _isInitialized = true;
   }
 
-  /// UDP Command Dispatcher (Direct to ESP32 IP)
-  void sendCommand(String type, String command, {int speed = 255}) {
-    if (_udpSocket == null) return;
-    
+  /// HTTP REST Command Dispatcher
+  Future<void> sendCommand(String type, String command, {int speed = 255}) async {
     final payload = {
       'type': type,
       'command': command,
       'speed': speed,
     };
     
-    final data = utf8.encode(jsonEncode(payload));
-    _udpSocket!.send(data, InternetAddress(_espApIp), _commandPort);
-    debugPrint("[OfflineService] UDP Command Sent: $command");
+    try {
+      final response = await http.post(
+        Uri.parse('$_espUrl/command'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+      if (response.statusCode == 200) {
+        debugPrint("[OfflineService] HTTP Command Sent: $command");
+      } else {
+        debugPrint("[OfflineService] HTTP Command Failed: ${response.statusCode}");
+      }
+    } catch (e) {
+      debugPrint("[OfflineService] HTTP Request Error: $e");
+    }
   }
 
   /// Process raw frame bytes with TFLite and autonomously send command
@@ -106,7 +94,6 @@ class OfflineService {
   }
 
   void dispose() {
-    _udpSocket?.close();
     _interpreter?.close();
     _telemetryController.close();
   }
