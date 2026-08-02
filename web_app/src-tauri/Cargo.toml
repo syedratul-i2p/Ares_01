@@ -25,5 +25,6 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 reqwest = "0.13.3"
 tauri-plugin-fs = "2.5.1"
+regex = "1.10.4"
 tauri-plugin-http = "2.5.9"
 base64 = "0.22.1"

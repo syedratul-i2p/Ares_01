@@ -105,6 +105,70 @@ async fn save_video_command(video_bytes: Vec<u8>, app_handle: tauri::AppHandle) 
     Ok(file_path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+async fn read_firmware() -> Result<String, String> {
+    std::fs::read_to_string("d:\\ARES-01\\esp32_firmware\\src\\main.cpp")
+        .map_err(|e| format!("Failed to read firmware: {}", e))
+}
+
+#[tauri::command]
+async fn flash_firmware(ssid: String, pass: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+    let path = "d:\\ARES-01\\esp32_firmware\\src\\main.cpp";
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read firmware: {}", e))?;
+    
+    let re_ssid = regex::Regex::new(r#"const char \*sta_ssid\s*=\s*"[^"]*";"#).unwrap();
+    let re_pass = regex::Regex::new(r#"const char \*sta_password\s*=\s*"[^"]*";"#).unwrap();
+    
+    let updated = re_ssid.replace(&content, format!("const char *sta_ssid = \"{}\";", ssid).as_str());
+    let final_content = re_pass.replace(&updated, format!("const char *sta_password = \"{}\";", pass).as_str());
+    
+    std::fs::write(path, final_content.as_ref())
+        .map_err(|e| format!("Failed to write firmware: {}", e))?;
+    
+    use std::process::{Command, Stdio};
+    use std::io::{BufRead, BufReader};
+    use tauri::Emitter;
+
+    let mut child = Command::new("powershell")
+        .args(["-Command", "~/.platformio/penv/Scripts/pio.exe run -t upload --upload-port COM7"])
+        .current_dir("d:\\ARES-01\\esp32_firmware")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn pio: {}", e))?;
+        
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let app_handle_clone = app_handle.clone();
+    let app_handle_clone2 = app_handle.clone();
+    
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                let _ = app_handle_clone.emit("build-log", line);
+            }
+        }
+    });
+
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                let _ = app_handle_clone2.emit("build-log", format!("ERR: {}", line));
+            }
+        }
+    });
+    
+    let status = child.wait().map_err(|e| format!("Failed to wait for pio: {}", e))?;
+    
+    if status.success() {
+        Ok("Flash successful!".to_string())
+    } else {
+        Err("Flash failed!".to_string())
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -121,7 +185,7 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![capture_photo, send_drive_command, send_arm_command, save_screenshot_command, save_video_command])
+    .invoke_handler(tauri::generate_handler![capture_photo, send_drive_command, send_arm_command, save_screenshot_command, save_video_command, read_firmware, flash_firmware])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

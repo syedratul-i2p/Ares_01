@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 // Polyfill types for WebSerial
 declare global {
@@ -16,68 +18,7 @@ declare global {
   }
 }
 
-const FIRMWARE_CODE = `\
-#include "HardwareController.h"
-#include "esp_camera.h"
-#include "esp_log.h"
-#include <Arduino.h>
-#include <ArduinoJson.h>
-#include <WebServer.h>
-#include <WebSocketsServer.h>
-#include <WiFi.h>
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
-
-// Function Prototypes
-void executeHardwareCommand(String mode, String action, String direction,
-                            int speed, String joint, int angle);
-void handleCommand();
-void stream_handler();
-void handleCapture();
-
-// Global Hardware Fault Flags
-bool camera_fault = false;
-
-// Define Log Tags
-static const char *TAG_SYS = "SYS";
-static const char *TAG_WIFI = "WIFI";
-static const char *TAG_CAM = "CAM";
-static const char *TAG_HTTP = "HTTP";
-
-// NETWORK CONFIGURATION
-const char *ap_ssid = "ARES_01_OFFLINE";
-const char *ap_password = "Admin123";
-const char *sta_ssid = "N3M0_0x7A";
-const char *sta_password = "Ratul_i2p@6072";
-
-WebServer server(80);
-WebSocketsServer webSocket(81);
-unsigned long lastTelemetryTime = 0;
-
-void setup() {
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Disable Brownout detector
-  vTaskDelay(pdMS_TO_TICKS(1000)); 
-  Serial.begin(115200);
-
-  // Initialize Custom Hardware Controller (I2C, PWM, Sensors)
-  Hardware.begin();
-  
-  ESP_LOGI(TAG_SYS, "Booting Advanced ESP32-S3 Firmware...");
-  
-  // Connect WiFi
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP(ap_ssid, ap_password, 6, 0, 4);
-  ESP_LOGI(TAG_WIFI, "AP Live on Channel 6. IP: %s", WiFi.softAPIP().toString().c_str());
-
-  WiFi.begin(sta_ssid, sta_password);
-  // ... (Full code omitted for viewer brevity but visible in real deployment)
-  ESP_LOGI(TAG_SYS, "FreeRTOS Dual-Core Architecture initialized!");
-}
-
-void loop() {
-  vTaskDelete(NULL);
-}
-`;
+// Dynamic firmware code loaded from backend
 
 export default function EspStudio() {
   const [port, setPort] = useState<any>(null);
@@ -87,8 +28,37 @@ export default function EspStudio() {
   const [ssid, setSsid] = useState("");
   const [password, setPassword] = useState("");
   const [connected, setConnected] = useState(false);
+  const [firmwareCode, setFirmwareCode] = useState("Loading firmware source code...");
+  const [isFlashing, setIsFlashing] = useState(false);
   
   const terminalEndRef = useRef<HTMLDivElement>(null);
+
+  const fetchFirmware = async () => {
+    try {
+      const code = await invoke<string>("read_firmware");
+      setFirmwareCode(code);
+      toast.success("Code Viewer Synced!");
+    } catch (e) {
+      toast.error("Failed to read firmware: " + e);
+    }
+  };
+
+  useEffect(() => {
+    fetchFirmware();
+    
+    // Listen for background compiler logs
+    const unlistenPromise = listen<string>("build-log", (event) => {
+      setLogs((prev) => {
+        const newLogs = [...prev, event.payload];
+        if (newLogs.length > 1000) return newLogs.slice(newLogs.length - 1000);
+        return newLogs;
+      });
+    });
+
+    return () => {
+      unlistenPromise.then(unlisten => unlisten());
+    };
+  }, []);
 
   const scrollToBottom = () => {
     if (autoScroll && terminalEndRef.current) {
@@ -181,20 +151,43 @@ export default function EspStudio() {
   };
 
   const handleFlashConfig = async () => {
-    if (!connected || !port) {
-      toast.error("Connect Serial Port first!");
+    if (!ssid || !password) {
+      toast.error("Please provide both SSID and Password.");
       return;
     }
+    
+    // Mode B: Live Serial Injection (Zero-Downtime)
+    if (connected && port) {
+      try {
+        const textEncoder = new TextEncoderStream();
+        const writableStreamClosed = textEncoder.readable.pipeTo(port.writable);
+        const writer = textEncoder.writable.getWriter();
+        await writer.write(`$WIFI:${ssid}:${password}\n`);
+        writer.releaseLock();
+        toast.success("WiFi config dispatched over Serial (Mode B)!");
+        setLogs(prev => [...prev, "[SYSTEM] Dispatching runtime WiFi config via Mode B..."]);
+        return; // Success, bypass Mode A Compiler
+      } catch (e) {
+        toast.error("Failed Mode B dispatch. Falling back to Mode A.");
+        setLogs(prev => [...prev, "[SYSTEM] Mode B dispatch failed. Initiating Mode A Background Compiler..."]);
+      }
+    }
+    
+    setIsFlashing(true);
+    toast.loading("Compiling & Flashing ESP32 via PlatformIO...");
+    setLogs(prev => [...prev, "[SYSTEM] Initiating Mode A Background Build Pipeline..."]);
+    
     try {
-      const textEncoder = new TextEncoderStream();
-      const writableStreamClosed = textEncoder.readable.pipeTo(port.writable);
-      const writer = textEncoder.writable.getWriter();
-      const jsonStr = JSON.stringify({ mode: "config", ssid, password }) + "\\n";
-      await writer.write(jsonStr);
-      writer.releaseLock();
-      toast.success("WiFi config dispatched over Serial!");
-    } catch (e) {
-      toast.error("Failed to write to serial port.");
+      const result = await invoke<string>("flash_firmware", { ssid, pass: password });
+      toast.dismiss();
+      toast.success(result || "ESP32 Flashed Successfully!");
+      fetchFirmware(); // Sync code viewer with modified source
+    } catch (e: any) {
+      toast.dismiss();
+      toast.error("Flashing failed! Check logs.");
+      setLogs(prev => [...prev, "FLASH ERROR:", String(e)]);
+    } finally {
+      setIsFlashing(false);
     }
   };
 
@@ -259,15 +252,35 @@ export default function EspStudio() {
           {/* Firmware Viewer */}
           <div className="flex-1 flex flex-col min-h-0 relative">
             <div className="h-10 border-b border-white/5 flex items-center justify-between px-4 bg-zinc-900/30 shrink-0">
-              <span className="text-xs font-mono text-white/50">src/main.cpp</span>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-white/40 hover:text-white">
-                <Download className="w-3.5 h-3.5" />
+              <h3 className="font-semibold text-slate-100 flex items-center gap-2">
+                <Terminal className="w-5 h-5 text-indigo-400" />
+                Embedded Firmware Viewer
+                <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400 ml-2 border border-slate-700">
+                  esp32_firmware/src/main.cpp
+                </span>
+              </h3>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={fetchFirmware}
+                className="h-7 text-xs bg-transparent border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white"
+              >
+                Sync Code
               </Button>
             </div>
-            <div className="flex-1 overflow-auto bg-[#0d1117] p-4 p-4 font-mono text-xs leading-relaxed custom-scrollbar">
-              <pre className="text-slate-300">
-                <code>{FIRMWARE_CODE}</code>
-              </pre>
+            <div className="flex-1 bg-[#1A1B26] overflow-y-auto text-xs font-mono text-slate-300">
+              <div className="flex custom-scrollbar min-h-full">
+                {/* Line Numbers */}
+                <div className="flex flex-col text-right pr-4 pl-2 py-4 bg-black/40 text-slate-600 select-none border-r border-white/5">
+                  {firmwareCode.split("\n").map((_, i) => (
+                    <span key={i}>{i + 1}</span>
+                  ))}
+                </div>
+                {/* Code Content */}
+                <pre className="p-4 overflow-x-auto custom-scrollbar flex-1">
+                  <code>{firmwareCode}</code>
+                </pre>
+              </div>
             </div>
           </div>
         </div>

@@ -1,13 +1,14 @@
 #include "HardwareController.h"
 #include "esp_camera.h"
 #include "esp_log.h"
+#include "soc/rtc_cntl_reg.h"
+#include "soc/soc.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFi.h>
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
+#include <Preferences.h>
 
 // Function Prototypes
 void executeHardwareCommand(String mode, String action, String direction,
@@ -46,14 +47,15 @@ static const char *TAG_HTTP = "HTTP";
 // NETWORK CONFIGURATION
 const char *ap_ssid = "ARES_01_OFFLINE";
 const char *ap_password = "Admin123";
-const char *sta_ssid = "N3M0_0x7A";
-const char *sta_password = "Ratul_i2p@6072";
+const char *sta_ssid = "FFFF";
+const char *sta_password = "FFF";
 
 WebServer server(80);
 WebSocketsServer webSocket(81);
+Preferences preferences;
 unsigned long lastTelemetryTime = 0;
 
-void sendTelemetryData() {
+String getTelemetryJSON() {
   float distance_cm = Hardware.getDistance();
   if (distance_cm < 0)
     distance_cm = 999.9;
@@ -68,12 +70,14 @@ void sendTelemetryData() {
     battery_pct = constrain(battery_pct, 0, 100);
   }
 
-  String telemetryPayload = "{\"obstacle_distance\": " + String((int)distance_cm) +
-                            ", \"rssi\": " + String(rssi) +
-                            ", \"heap\": " + String(free_heap) +
-                            ", \"battery_percentage\": " + String(battery_pct) +
-                            ", \"state\": \"ONLINE\"}";
+  return "{\"obstacle_distance\": " + String((int)distance_cm) +
+         ", \"rssi\": " + String(rssi) + ", \"heap\": " + String(free_heap) +
+         ", \"battery_percentage\": " + String(battery_pct) +
+         ", \"state\": \"ONLINE\"}";
+}
 
+void sendTelemetryData() {
+  String telemetryPayload = getTelemetryJSON();
   Serial.println("[TELEMETRY] " + telemetryPayload);
   webSocket.broadcastTXT(telemetryPayload);
 }
@@ -159,7 +163,7 @@ void stream_handler() {
     server.send(503, "text/plain", "Camera Hardware Fault");
     return;
   }
-  
+
   WiFiClient client = server.client();
   if (!client.connected())
     return;
@@ -170,6 +174,9 @@ void stream_handler() {
   ESP_LOGI(TAG_HTTP, "MJPEG Stream client connected.");
   client.print("HTTP/1.1 200 OK\r\n");
   client.print("Access-Control-Allow-Origin: *\r\n");
+  client.print("Access-Control-Allow-Methods: GET, OPTIONS\r\n");
+  client.print("Cache-Control: no-cache, private, no-store, must-revalidate\r\n");
+  client.print("Pragma: no-cache\r\n");
   client.print("Content-Type: ");
   client.print(_STREAM_CONTENT_TYPE);
   client.print("\r\n\r\n");
@@ -188,7 +195,8 @@ void stream_handler() {
       fail_count++;
       ESP_LOGE(TAG_CAM, "Capture failed. Retrying... (%d/5)", fail_count);
       if (fail_count >= 5) {
-        ESP_LOGE(TAG_SYS, "Camera Fault! Bypassing camera hardware but keeping HTTP server alive.");
+        ESP_LOGE(TAG_SYS, "Camera Fault! Bypassing camera hardware but keeping "
+                          "HTTP server alive.");
         camera_fault = true;
         break;
       }
@@ -246,7 +254,8 @@ void handleCapture() {
   esp_camera_fb_return(fb);
   ESP_LOGI(TAG_HTTP, "Single frame captured and sent.");
 }
-void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload,
+                    size_t length) {
   switch (type) {
   case WStype_DISCONNECTED:
     ESP_LOGI(TAG_SYS, "WebSocket Client [%u] Disconnected", num);
@@ -355,9 +364,10 @@ void streamTask(void *pvParameters) {
       } else {
         warmup_fail_count++;
         if (warmup_fail_count >= 5) {
-           ESP_LOGE(TAG_SYS, "Camera Fault! Bypassing camera hardware but keeping HTTP server alive.");
-           camera_fault = true;
-           break;
+          ESP_LOGE(TAG_SYS, "Camera Fault! Bypassing camera hardware but "
+                            "keeping HTTP server alive.");
+          camera_fault = true;
+          break;
         }
       }
       vTaskDelay(pdMS_TO_TICKS(20));
@@ -393,6 +403,25 @@ void controlTask(void *pvParameters) {
     if (millis() - lastTelemetryTime > 100) {
       sendTelemetryData();
       lastTelemetryTime = millis();
+    }
+    
+    // Mode B: Non-blocking Serial Listener for Live WiFi Config Injection
+    if (Serial.available()) {
+      String line = Serial.readStringUntil('\n');
+      line.trim();
+      if (line.startsWith("$WIFI:")) {
+        int firstColon = line.indexOf(':');
+        int secondColon = line.indexOf(':', firstColon + 1);
+        if (firstColon > 0 && secondColon > 0) {
+          String new_ssid = line.substring(firstColon + 1, secondColon);
+          String new_pass = line.substring(secondColon + 1);
+          preferences.putString("ssid", new_ssid);
+          preferences.putString("pass", new_pass);
+          Serial.println("[SYSTEM] New WiFi Config Received via Serial! Reconnecting...");
+          WiFi.disconnect(true);
+          WiFi.begin(new_ssid.c_str(), new_pass.c_str());
+        }
+      }
     }
     vTaskDelay(pdMS_TO_TICKS(15));
   }
@@ -431,8 +460,12 @@ void setup() {
   ESP_LOGI(TAG_WIFI, "AP Live on Channel 6. IP: %s",
            WiFi.softAPIP().toString().c_str());
 
-  ESP_LOGI(TAG_WIFI, "Attempting STA connection to %s", sta_ssid);
-  WiFi.begin(sta_ssid, sta_password);
+  preferences.begin("ares", false);
+  String active_ssid = preferences.getString("ssid", sta_ssid);
+  String active_pass = preferences.getString("pass", sta_password);
+
+  ESP_LOGI(TAG_WIFI, "Attempting STA connection to %s", active_ssid.c_str());
+  WiFi.begin(active_ssid.c_str(), active_pass.c_str());
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
   unsigned long startAttemptTime = millis();
   bool staConnected = false;
@@ -471,6 +504,12 @@ void setup() {
   server.on("/stream", HTTP_GET, stream_handler);
   server.on("/capture", HTTP_GET, handleCapture);
 
+  server.on("/telemetry", HTTP_GET, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Cache-Control", "no-cache");
+    server.send(200, "application/json", getTelemetryJSON());
+  });
+
   server.onNotFound([]() {
     if (server.method() == HTTP_OPTIONS) {
       server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -487,11 +526,11 @@ void setup() {
   webSocket.onEvent(webSocketEvent);
   ESP_LOGI(TAG_SYS, "Monolithic Web Server and WebSocket Server Started.");
 
-  xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 1, &streamTaskHandle, 1);
-  xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 1, &controlTaskHandle, 0);
+  xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 1,
+                          &streamTaskHandle, 1);
+  xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 1,
+                          &controlTaskHandle, 0);
   ESP_LOGI(TAG_SYS, "FreeRTOS Dual-Core Architecture initialized!");
 }
 
-void loop() {
-  vTaskDelete(NULL);
-}
+void loop() { vTaskDelete(NULL); }

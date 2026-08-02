@@ -19,22 +19,28 @@ import { motion, AnimatePresence } from "framer-motion";
 
 function useContinuousAction(action: () => void, intervalMs: number = 50) {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  const start = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
-    e.currentTarget.releasePointerCapture(e.pointerId);
-    action();
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = setInterval(() => {
-      action();
-    }, intervalMs);
-  }, [action, intervalMs]);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const stop = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    intervalRef.current = null;
+    timeoutRef.current = null;
   }, []);
+
+  const start = useCallback((e: React.SyntheticEvent) => {
+    if (e.cancelable) {
+      e.preventDefault();
+    }
+    stop();
+    action();
+    
+    timeoutRef.current = setTimeout(() => {
+      intervalRef.current = setInterval(() => {
+        action();
+      }, intervalMs);
+    }, 250);
+  }, [action, intervalMs, stop]);
 
   useEffect(() => {
     return stop;
@@ -44,6 +50,7 @@ function useContinuousAction(action: () => void, intervalMs: number = 50) {
     onPointerDown: start,
     onPointerUp: stop,
     onPointerLeave: stop,
+    onPointerCancel: stop,
     onContextMenu: (e: React.SyntheticEvent) => e.preventDefault(),
   };
 }
@@ -511,7 +518,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                     <input
                       type="text"
                       className="h-6 text-[10px] bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
-                      placeholder="172.30.43.196/stream"
+                      placeholder="192.168.0.200"
                       value={roverIp}
                       onChange={e => setRoverIp(e.target.value)}
                       onKeyDown={e => e.key === "Enter" && handleConnectCamera()}
@@ -1063,7 +1070,7 @@ export default function Dashboard() {
   const [roverMode, setRoverMode] = useState<"MANUAL" | "AUTONOMOUS">("MANUAL");
 
   // ── Camera Stream State (Moved up for hook dependency array)
-  const [roverIp, setRoverIp] = useState("172.30.43.196/stream");
+  const [roverIp, setRoverIp] = useState("192.168.0.200");
   const [streamSrc, setStreamSrc] = useState<string | null>(null);
   const [streamError, setStreamError] = useState(false);
 
@@ -1085,23 +1092,38 @@ export default function Dashboard() {
     rssi: 0,
     heap: 0
   });
+  const [roverOnline, setRoverOnline] = useState(false);
   const [aiTaskState, setAiTaskState] = useState<"idle" | "rotate_to_scan" | "await_lock" | "approach" | "pickup">("idle");
   const aiTaskStateRef = useRef(aiTaskState);
   useEffect(() => { aiTaskStateRef.current = aiTaskState; }, [aiTaskState]);
   const telemetryRef = useRef(telemetry);
   useEffect(() => { telemetryRef.current = telemetry; }, [telemetry]);
 
-  // Connect directly to ESP32-S3 Telemetry via WebSocket
+  // Connect directly to ESP32-S3 Telemetry via WebSocket and HTTP Fallback
   useEffect(() => {
     if (!streamSrc) return;
     try {
       const ipMatch = streamSrc.match(/(?:https?:\/\/)?([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/);
       const ip = ipMatch ? ipMatch[1] : null;
       if (!ip) {
-        console.warn("[ARES-01] Could not extract raw IP for WebSocket from:", streamSrc);
+        console.warn("[ARES-01] Could not extract raw IP for Telemetry from:", streamSrc);
         return;
       }
       
+      let lastPacketTime = Date.now();
+      
+      const updateTelemetry = (data: any) => {
+        setRoverOnline(true);
+        lastPacketTime = Date.now();
+        setTelemetry(prev => ({
+          ...prev,
+          obstacle_distance: data.obstacle_distance ?? data.distance ?? prev.obstacle_distance,
+          battery_percentage: data.battery_percentage ?? data.battery ?? prev.battery_percentage,
+          rssi: data.rssi ?? prev.rssi,
+          heap: data.heap ?? prev.heap
+        }));
+      };
+
       const wsUrl = `ws://${ip}:81/`;
       console.log(`[ARES-01] Auto-init WebSocket telemetry to: ${wsUrl}`);
       const telemetryWs = new WebSocket(wsUrl);
@@ -1109,18 +1131,25 @@ export default function Dashboard() {
       
       telemetryWs.onmessage = (e) => {
         try {
-          const data = JSON.parse(e.data);
-          setTelemetry(prev => ({
-            ...prev,
-            obstacle_distance: data.obstacle_distance !== undefined ? data.obstacle_distance : (data.distance !== undefined ? data.distance : prev.obstacle_distance),
-            battery_percentage: data.battery_percentage !== undefined ? data.battery_percentage : (data.battery !== undefined ? data.battery : prev.battery_percentage),
-            rssi: data.rssi !== undefined ? data.rssi : prev.rssi,
-            heap: data.heap !== undefined ? data.heap : prev.heap
-          }));
+          updateTelemetry(JSON.parse(e.data));
         } catch (err) {}
       };
+
+      const pollInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`http://${ip}/telemetry`);
+          if (res.ok) {
+            updateTelemetry(await res.json());
+          }
+        } catch (err) {}
+        
+        if (Date.now() - lastPacketTime > 3000) {
+          setRoverOnline(false);
+        }
+      }, 1000);
       
       const resetTelemetry = () => {
+        setRoverOnline(false);
         setTelemetry(prev => ({
           ...prev,
           battery_percentage: null,
@@ -1134,6 +1163,7 @@ export default function Dashboard() {
       telemetryWs.onerror = resetTelemetry;
 
       return () => {
+        clearInterval(pollInterval);
         globalWs = null;
         telemetryWs.close();
       };
@@ -1332,7 +1362,6 @@ export default function Dashboard() {
   }, []);
 
   // ── Rover heartbeat / Firebase connection
-  const [roverOnline, setRoverOnline] = useState(false);
   const [fbStatus, setFbStatus] = useState<"ready" | "not-configured">("not-configured");
 
   useEffect(() => {
