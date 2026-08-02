@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
+import EspStudio from "@/pages/EspStudio";
 import { BootLoader } from "@/components/BootLoader";
 
 const queryClient = new QueryClient();
@@ -15,6 +16,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/studio" component={EspStudio} />
       <Route component={NotFound} />
     </Switch>
   );

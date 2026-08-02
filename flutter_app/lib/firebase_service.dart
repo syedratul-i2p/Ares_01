@@ -46,19 +46,20 @@ class FirebaseService {
   }
 
   /// 2. Command Dispatcher (Uplink to ESP32)
-  Future<void> sendCommand(String type, String command, {int speed = 255}) async {
+  Future<void> sendCommand(String action, String direction, {int speed = 255}) async {
     if (!_isInitialized) return;
     
     final payload = {
-      'type': type,
-      'command': command,
+      'mode': 'manual',
+      'action': action,
+      'direction': direction,
       'speed': speed,
       'timestamp': ServerValue.timestamp, // Ensure the ESP32 registers a state change
     };
 
     try {
       await _dbRef.child('ares_01/commands/current_action').set(jsonEncode(payload));
-      debugPrint("[FirebaseService] Command Dispatched: $command");
+      debugPrint("[FirebaseService] Command Dispatched: $action - $direction");
     } catch (e) {
       debugPrint("[FirebaseService] Failed to dispatch command: $e");
     }

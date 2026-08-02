@@ -49,7 +49,7 @@ export const CameraOverlay = React.memo(function CameraOverlay({
         style={{ opacity: flash ? 0.8 : 0 }}
       />
 
-      <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center p-1 z-30 pointer-events-auto bg-slate-900/60 backdrop-blur-xl border border-white/10 rounded-full shadow-[0_8px_20px_rgba(0,0,0,0.4)] transition-all duration-300 ${isRecording ? 'pl-1 pr-3' : 'px-1'}`}>
+      <div className={`flex items-center p-1.5 z-30 pointer-events-auto bg-black/40 backdrop-blur-xl border border-white/20 rounded-full shadow-[0_4px_30px_rgba(0,0,0,0.5)] hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] transition-all duration-300 ${isRecording ? 'pl-2 pr-4 shadow-[0_0_15px_rgba(225,29,72,0.3)] border-rose-500/40' : 'px-1.5'}`}>
         
         {/* Capture Photo Button */}
         <button
@@ -57,7 +57,7 @@ export const CameraOverlay = React.memo(function CameraOverlay({
           className="group relative flex items-center justify-center w-9 h-9 rounded-full hover:bg-white/10 transition-colors duration-200 cursor-pointer shrink-0"
           title="Capture Photo"
         >
-          <Camera className="w-[15px] h-[15px] text-cyan-400 group-active:scale-90 transition-transform duration-200" />
+          <Camera className="w-[18px] h-[18px] text-cyan-400 group-active:scale-90 transition-transform duration-200" />
         </button>
 
         {/* Divider */}
@@ -75,7 +75,7 @@ export const CameraOverlay = React.memo(function CameraOverlay({
             {isRecording ? (
               <div className="w-3 h-3 bg-rose-500 rounded-sm group-active:scale-90 transition-transform duration-200" />
             ) : (
-              <Video className="w-[15px] h-[15px] text-rose-400 group-active:scale-90 transition-transform duration-200" />
+              <Video className="w-[18px] h-[18px] text-rose-400 group-active:scale-90 transition-transform duration-200" />
             )}
             
             {/* Active Recording Blip */}

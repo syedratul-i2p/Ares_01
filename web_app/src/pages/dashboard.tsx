@@ -4,8 +4,9 @@ import {
   ArrowLeft, ArrowRight, Square, Mic, Send, CheckCircle2, Cpu,
   Thermometer, Zap, Radio, Ruler, Wifi, WifiOff, Loader2,
   Activity, X, RotateCcw, Gamepad2, Bot, AlertTriangle, Database, Camera,
-  Monitor, Film, Minus
+  Monitor, Film, Minus, Brain, Sparkles, Terminal
 } from "lucide-react";
+import { Link } from "wouter";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { useTheme } from "@/components/theme-provider";
@@ -15,6 +16,54 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
+
+function useContinuousAction(action: () => void, intervalMs: number = 50) {
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const start = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    action();
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      action();
+    }, intervalMs);
+  }, [action, intervalMs]);
+
+  const stop = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return stop;
+  }, [stop]);
+
+  return {
+    onPointerDown: start,
+    onPointerUp: stop,
+    onPointerLeave: stop,
+    onContextMenu: (e: React.SyntheticEvent) => e.preventDefault(),
+  };
+}
+
+const normalizeBengaliNumbers = (text: string) => {
+  const bengaliToEnglish: { [key: string]: string } = {
+    '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+    '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+  };
+  return text.replace(/[০-৯]/g, match => bengaliToEnglish[match] || match);
+};
+
+const ContinuousButton = ({ onClick, className, children, 'data-testid': testId }: any) => {
+  const handlers = useContinuousAction(onClick, 50);
+  return (
+    <button className={className} data-testid={testId} {...handlers}>
+      {children}
+    </button>
+  );
+};
 
 import { CameraOverlay } from "@/components/CameraOverlay";
 import { toast } from "sonner";
@@ -66,16 +115,30 @@ const renderLogLine = (log: string) => {
   return <div className="py-0.5">{log}</div>;
 };
 
+let globalWs: WebSocket | null = null;
+
 const sendCommandViaHttp = async (ip: string, payload: any) => {
+  if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+    try {
+      globalWs.send(JSON.stringify(payload));
+      return;
+    } catch (err) {
+      console.warn("WebSocket send failed, falling back to HTTP", err);
+    }
+  }
+
   if (!ip) return;
   try {
     let url = ip.trim();
     if (!url.startsWith("http")) url = `http://${url}`;
-    const endpoint = url.endsWith("/command") ? url : `${url}/command`;
+    // Ensure the URL correctly targets the /command endpoint without trailing slashes duplicated
+    const base = url.endsWith("/") ? url.slice(0, -1) : url;
+    const endpoint = base.endsWith("/command") ? base : `${base}/command`;
     
     await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      // Using text/plain avoids the CORS OPTIONS preflight request entirely
+      headers: { "Content-Type": "text/plain" },
       body: JSON.stringify(payload)
     });
   } catch (err) {
@@ -95,13 +158,13 @@ const JOINT_CONFIG = {
 const JOINT_ORDER = ["base", "shoulder", "elbow", "wrist", "gripper"] as const;
 
 const ARM_PRESETS = [
-  { name: "Home",  joints: { base: 90, shoulder: 90,  elbow: 90,  wrist: 90, gripper: 0   } },
+  { name: "Home",  joints: { base: 90, shoulder: 90,  elbow: 90,  wrist: 90, gripper: 90   } },
   { name: "Pick",  joints: { base: 90, shoulder: 45,  elbow: 135, wrist: 90, gripper: 180 } },
-  { name: "Drop",  joints: { base: 45, shoulder: 60,  elbow: 90,  wrist: 45, gripper: 0   } },
+  { name: "Drop",  joints: { base: 45, shoulder: 60,  elbow: 90,  wrist: 45, gripper: 90   } },
   { name: "Reach", joints: { base: 90, shoulder: 150, elbow: 150, wrist: 90, gripper: 90  } },
 ];
 
-const DEFAULT_JOINTS: ArmAngles = { base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 };
+const DEFAULT_JOINTS: ArmAngles = { base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 };
 
 // ─── Sub-Components (Memoized to prevent unnecessary re-renders) ───────────────
 
@@ -183,16 +246,50 @@ const Header = React.memo(function Header({
         </Badge>
       </div>
       <div className="flex items-center gap-1 pointer-events-auto">
-        {/* Rover Mode Toggle */}
-        <div className="flex items-center gap-2 mr-2 bg-black/20 px-3 py-1.5 rounded-full border border-white/5">
-          <span className={`text-[10px] font-bold tracking-wider ${roverMode === "AUTONOMOUS" ? "text-green-400" : "text-white/70"}`}>
-            {roverMode === "AUTONOMOUS" ? "AUTO" : "MANUAL"}
-          </span>
-          <ToggleSwitch 
-            checked={roverMode === "AUTONOMOUS"} 
-            onChange={(checked) => onToggleRoverMode(checked ? "AUTONOMOUS" : "MANUAL")} 
-          />
+        {/* Rover Mode Segmented Control */}
+        <div className="flex items-center p-1 rounded-xl bg-black/40 border border-white/10 shadow-inner relative">
+          <button
+            onClick={() => onToggleRoverMode("MANUAL")}
+            className={`relative flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-colors duration-300 z-10 ${
+              roverMode === "MANUAL" ? "text-white" : "text-white/40 hover:text-white/70"
+            }`}
+          >
+            {roverMode === "MANUAL" && (
+              <motion.div
+                layoutId="modeIndicator"
+                className="absolute inset-0 bg-slate-700/80 rounded-lg shadow-[0_0_10px_rgba(255,255,255,0.1)] border border-white/20 -z-10"
+                transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+              />
+            )}
+            <Gamepad2 className="w-3.5 h-3.5" />
+            <span>MANUAL</span>
+          </button>
+          
+          <button
+            onClick={() => onToggleRoverMode("AUTONOMOUS")}
+            className={`relative flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-colors duration-300 z-10 ${
+              roverMode === "AUTONOMOUS" ? "text-white drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]" : "text-white/40 hover:text-white/70"
+            }`}
+          >
+            {roverMode === "AUTONOMOUS" && (
+              <motion.div
+                layoutId="modeIndicator"
+                className="absolute inset-0 bg-indigo-600/50 rounded-lg shadow-[0_0_15px_rgba(99,102,241,0.6)] border border-indigo-400/50 overflow-hidden -z-10"
+                transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/0 via-purple-500/30 to-pink-500/0 animate-pulse" />
+              </motion.div>
+            )}
+            <Brain className="w-3.5 h-3.5" />
+            <Sparkles className="w-2.5 h-2.5 absolute top-1 right-1 text-yellow-300 animate-pulse" />
+            <span className="ml-1">AUTONOMOUS</span>
+          </button>
         </div>
+        <Link href="/studio">
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white" data-testid="button-studio">
+            <Terminal className="w-3.5 h-3.5" />
+          </Button>
+        </Link>
         <Button variant={showSettings ? "secondary" : "ghost"} size="icon" className="h-8 w-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
           onClick={() => setShowSettings(s => !s)} data-testid="button-settings">
           {showSettings ? <X className="w-3.5 h-3.5" /> : <Settings className="w-3.5 h-3.5" />}
@@ -227,6 +324,7 @@ interface SettingsPanelProps {
   streamError: boolean;
   handleConnectCamera: () => void;
   handleDisconnectCamera: () => void;
+  handleConnectCommand: () => void;
   commandUrl: string;
   setCommandUrl: (val: string) => void;
   ping: number | null;
@@ -254,6 +352,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
   streamError,
   handleConnectCamera,
   handleDisconnectCamera,
+  handleConnectCommand,
   commandUrl,
   setCommandUrl,
   ping,
@@ -448,7 +547,15 @@ const SettingsPanel = React.memo(function SettingsPanel({
                       placeholder="172.30.43.196"
                       value={commandUrl}
                       onChange={e => setCommandUrl(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && handleConnectCommand()}
                     />
+                    <button
+                      onClick={handleConnectCommand}
+                      disabled={!commandUrl.trim()}
+                      className="w-full sm:w-auto px-2.5 py-1.5 sm:py-0.5 text-[10px] sm:text-[9px] font-bold rounded bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground transition-all cursor-pointer border-0"
+                    >
+                      Connect
+                    </button>
                   </div>
                 </div>
               </div>
@@ -544,22 +651,17 @@ const CameraView = React.memo(function CameraView({
   }, [streamSrc, setStreamError]);
 
   return (
-    <div
-      className="w-full h-full relative bg-black/60 backdrop-blur-md overflow-hidden flex items-center justify-center pointer-events-none select-none"
-      style={{
-        transform: "translate3d(0, 0, 0)",
-        willChange: "transform"
-      }}
-    >
-      {streamSrc && !streamError && blobUrl ? (
-        <img
-          id="rover-video-stream"
-          src={blobUrl}
+    <div className="relative w-full h-full bg-[#050505] overflow-hidden">
+      {streamSrc && !streamError ? (
+        <img 
+          key={streamSrc}
+          src={streamSrc} 
           alt="ARES-01 live feed"
-          className="w-full h-full object-contain aspect-video rounded-xl sm:rounded-none transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
+          className="w-full h-full object-cover rounded-xl transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
+          onLoadStart={() => console.log(`[ARES-01] Camera stream loading from ${streamSrc}`)}
           onError={() => {
             setStreamError(true);
-            console.warn(`[ARES-01] Camera stream error at ${streamSrc}`);
+            console.error(`[ARES-01] Camera stream error at ${streamSrc}. Connection refused or timed out.`);
           }}
           data-testid="camera-feed"
         />
@@ -591,51 +693,6 @@ const CameraView = React.memo(function CameraView({
             )}
           </div>
         </>
-      )}
-
-      <div className="absolute top-3 left-3 flex items-center gap-2 pointer-events-none">
-        <div className={`flex items-center gap-1.5 bg-black/55 backdrop-blur-md border border-white/10 rounded-md px-2.5 py-1 transition-all duration-500 ${streamSrc && !streamError ? "border-green-500/30" : ""}`}>
-          <span className={`w-1.5 h-1.5 rounded-full transition-colors duration-500 ${streamSrc && !streamError ? "bg-green-400 animate-pulse" : "bg-white/30"}`} />
-          <span className="text-white text-[11px] font-medium">{streamSrc && !streamError ? "Live" : "No Signal"}</span>
-        </div>
-      </div>
-      <div className="absolute top-3 right-3 flex items-center gap-2 pointer-events-none">
-        {rssi !== undefined && (
-          <div className="flex items-center gap-1.5 bg-black/55 backdrop-blur-md border border-white/10 rounded-md px-2.5 py-1">
-            <Signal className="w-3 h-3 text-white/70" />
-            <span className="text-white/80 font-mono text-[11px]">{rssi} dBm</span>
-          </div>
-        )}
-        {solar !== undefined && (
-          <div className="flex items-center gap-1.5 bg-black/55 backdrop-blur-md border border-white/10 rounded-md px-2.5 py-1">
-            <Zap className="w-3 h-3 text-yellow-400" />
-            <span className="text-white/80 font-mono text-[11px]">{solar.toFixed(1)}V</span>
-          </div>
-        )}
-        {distance !== undefined && (
-          <div className="flex items-center gap-1.5 bg-black/55 backdrop-blur-md border border-white/10 rounded-md px-2.5 py-1">
-            <Ruler className="w-3 h-3 text-blue-400" />
-            <span className="text-white/80 font-mono text-[11px]">{distance} cm</span>
-          </div>
-        )}
-      </div>
-
-      {/* Phase 7: Proximity Radar */}
-      {distance !== undefined && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[80%] max-w-sm pointer-events-none flex flex-col items-center gap-1.5 backdrop-blur-sm bg-black/40 p-2 rounded-xl border border-white/10">
-          <div className="w-full flex justify-between text-[10px] font-mono font-semibold uppercase tracking-wider text-white/80">
-            <span>Obstacle Proximity</span>
-            <span className={distance < 15 ? 'text-red-400 animate-pulse font-bold' : distance < 30 ? 'text-yellow-400' : 'text-green-400'}>
-              {distance < 15 ? "BRAKE" : distance + " cm"}
-            </span>
-          </div>
-          <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-            <div 
-              className={`h-full transition-all duration-300 ${distance < 15 ? 'bg-red-500' : distance < 30 ? 'bg-yellow-500' : 'bg-green-500'}`}
-              style={{ width: `${Math.min(100, Math.max(0, (100 - distance)))}%` }} 
-            />
-          </div>
-        </div>
       )}
     </div>
   );
@@ -725,8 +782,8 @@ interface ArmControlsProps {
   joints: ArmAngles;
   setJointAngle: (joint: keyof ArmAngles, raw: number) => void;
   updateJoint: (joint: keyof ArmAngles, delta: number) => void;
-  stepSize: 1 | 5 | 15;
-  setStepSize: React.Dispatch<React.SetStateAction<1 | 5 | 15>>;
+  stepSize: number;
+  setStepSize: React.Dispatch<React.SetStateAction<number>>;
   applyPreset: (p: typeof ARM_PRESETS[0]) => void;
   handleResetArm: () => void;
   editingJoint: keyof ArmAngles | null;
@@ -915,13 +972,6 @@ const ArmControls = React.memo(function ArmControls({
       <div className="flex items-center justify-between">
         <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">5DOF Arm Control</div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded-md overflow-hidden border border-border text-[10px] font-mono">
-            {([1, 5, 15] as const).map(s => (
-              <button key={s} onClick={() => { setStepSize(s); }}
-                className={`px-2 py-0.5 transition-all duration-300 ease-out active:scale-95 ${stepSize === s ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted hover:scale-105 hover:text-foreground"}`}
-                data-testid={`btn-step-${s}`}>{s}°</button>
-            ))}
-          </div>
           <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"
             onClick={handleResetArm} data-testid="btn-arm-reset">
             <RotateCcw className="w-3 h-3" />
@@ -954,58 +1004,33 @@ const ArmControls = React.memo(function ArmControls({
             const cfg = JOINT_CONFIG[key];
             const value = joints[key];
             return (
-              <div key={key} className="arm-slider-row flex flex-col md:flex-row md:items-center gap-1 md:gap-1.5 py-1 md:py-0 border-b border-white/[0.03] md:border-0 pb-1.5 md:pb-0">
-                {/* Mobile label and value row */}
-                <div className="arm-slider-label-row flex items-center justify-between md:w-[70px] shrink-0">
-                  <div className="flex items-center gap-1">
-                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${cfg.dotClass}`} />
-                    <span className="text-xs font-semibold text-muted-foreground truncate">{cfg.label}</span>
-                  </div>
-                  {/* Show value on right side on mobile */}
-                  <span className={`text-xs font-mono font-bold md:hidden ${cfg.accentClass}`}>{value}°</span>
-                </div>
+              <div key={key} className="flex items-center justify-between gap-4 flex-1 w-full relative group bg-white/5 border border-white/[0.03] hover:border-white/10 rounded-lg p-1.5 transition-colors mb-1">
                 
-                {/* Control Row: Dec button, Slider, Inc button, Desktop Value */}
-                <div className="arm-slider-control-row flex items-center gap-2 flex-1 w-full relative">
-                  <button onClick={() => { updateJoint(key, -stepSize); }}
-                    className="h-6 w-6 md:h-5 md:w-5 shrink-0 rounded border border-white/10 flex items-center justify-center text-xs md:text-[10px] bg-white/5 hover:bg-white/10 hover:border-white/20 hover:scale-105 hover:shadow-[0_0_10px_rgba(255,255,255,0.1)] active:scale-90 transition-all duration-300 ease-out font-semibold cursor-pointer text-foreground select-none"
-                    data-testid={`btn-arm-${key}-dec`}>−</button>
-                  
-                  <div className="relative flex-1 group flex items-center h-full">
-                    {/* Floating Badge */}
-                    <div className="absolute -top-7 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none select-none z-10" style={{ left: `calc(${(value / 180) * 100}%)` }}>
-                       <div className="px-1.5 py-0.5 rounded-md bg-slate-900 dark:bg-black/80 border border-white/10 text-[9px] font-mono text-white shadow-[0_0_10px_rgba(0,0,0,0.5)] backdrop-blur-md">
-                          {value}°
-                       </div>
-                       <div className="w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px] border-t-white/10 absolute -bottom-[4px] left-1/2 transform -translate-x-1/2" />
-                    </div>
-                    
-                    <input type="range" min={0} max={180} value={value}
-                      onChange={e => setJointAngle(key, Number(e.target.value))}
-                      className="joint-slider w-full h-1 md:h-1 cursor-pointer"
-                      style={{ color: cfg.color }}
-                      data-testid={`slider-arm-${key}`} />
-                  </div>
+                {/* Left Column: Label & Dot */}
+                <div className="flex items-center gap-2 md:w-[75px] shrink-0">
+                  <span className={`w-2 h-2 rounded-full shrink-0 shadow-[0_0_8px_currentColor]`} style={{ color: cfg.color, backgroundColor: cfg.color }} />
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{cfg.label}</span>
+                </div>
 
-                  <button onClick={() => { updateJoint(key, stepSize); }}
-                    className="h-6 w-6 md:h-5 md:w-5 shrink-0 rounded border border-white/10 flex items-center justify-center text-xs md:text-[10px] bg-white/5 hover:bg-white/10 hover:border-white/20 hover:scale-105 hover:shadow-[0_0_10px_rgba(255,255,255,0.1)] active:scale-90 transition-all duration-300 ease-out font-semibold cursor-pointer text-foreground select-none"
-                    data-testid={`btn-arm-${key}-inc`}>+</button>
+                {/* Center Column: Directional Buttons */}
+                <div className="flex items-center gap-6 md:gap-8 justify-center flex-1">
+                  <ContinuousButton 
+                    onClick={() => updateJoint(key, -stepSize)}
+                    className="h-8 w-12 md:h-7 md:w-14 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
+                    data-testid={`btn-arm-${key}-dec`}>
+                    {key === "base" ? <ArrowLeft className="w-5 h-5 md:w-4 md:h-4 text-slate-300" /> : 
+                     key === "gripper" ? <span className="text-[9px] font-bold tracking-widest text-slate-300">OPEN</span> : 
+                     <ArrowDown className="w-5 h-5 md:w-4 md:h-4 text-slate-300" />}
+                  </ContinuousButton>
                   
-                  {/* Desktop value editor / viewer */}
-                  <div className="hidden md:block w-10 text-right">
-                    {editingJoint === key ? (
-                       <input type="number" min={0} max={180} value={editValue}
-                        onChange={e => setEditValue(e.target.value)}
-                        onBlur={() => commitEdit(key)}
-                        onKeyDown={e => { if (e.key === "Enter") commitEdit(key); if (e.key === "Escape") setEditingJoint(null); }}
-                        className="w-10 text-right font-mono text-[10px] border border-primary rounded px-0.5 py-0.5 bg-background focus:outline-none"
-                        autoFocus data-testid={`input-arm-${key}-direct`} />
-                    ) : (
-                      <button onClick={() => startEdit(key, value)}
-                        className={`w-10 text-right text-xs font-mono font-bold tabular-nums hover:underline cursor-text shrink-0 ${cfg.accentClass}`}
-                        data-testid={`btn-arm-${key}-value`}>{value}°</button>
-                    )}
-                  </div>
+                  <ContinuousButton 
+                    onClick={() => updateJoint(key, stepSize)}
+                    className="h-8 w-12 md:h-7 md:w-14 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
+                    data-testid={`btn-arm-${key}-inc`}>
+                    {key === "base" ? <ArrowRight className="w-5 h-5 md:w-4 md:h-4 text-slate-300" /> : 
+                     key === "gripper" ? <span className="text-[9px] font-bold tracking-widest text-slate-300">CLOSE</span> : 
+                     <ArrowUp className="w-5 h-5 md:w-4 md:h-4 text-slate-300" />}
+                  </ContinuousButton>
                 </div>
               </div>
             );
@@ -1048,9 +1073,17 @@ export default function Dashboard() {
   // ── WebSocket References
 
   // ── Phase 6.1 Telemetry & Task Queue State
-  const [telemetry, setTelemetry] = useState({ 
-    locked: false, x: 0, y: 0, w: 0, h: 0, area: 0, 
-    battery_percentage: 0.0, obstacle_distance: 999.9, auto_brake: false 
+  interface SystemTelemetry {
+    battery_percentage: number | null;
+    obstacle_distance: number;
+    rssi: number;
+    heap: number;
+  }
+  const [telemetry, setTelemetry] = useState<SystemTelemetry>({ 
+    battery_percentage: null, 
+    obstacle_distance: 0,
+    rssi: 0,
+    heap: 0
   });
   const [aiTaskState, setAiTaskState] = useState<"idle" | "rotate_to_scan" | "await_lock" | "approach" | "pickup">("idle");
   const aiTaskStateRef = useRef(aiTaskState);
@@ -1058,18 +1091,56 @@ export default function Dashboard() {
   const telemetryRef = useRef(telemetry);
   useEffect(() => { telemetryRef.current = telemetry; }, [telemetry]);
 
-  // Connect to Python Backend Telemetry
+  // Connect directly to ESP32-S3 Telemetry via WebSocket
   useEffect(() => {
-    const hostname = window.location.hostname || "127.0.0.1";
-    const telemetryWs = new WebSocket(`ws://${hostname}:5000/telemetry`);
-    telemetryWs.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        setTelemetry(data);
-      } catch (err) {}
-    };
-    return () => telemetryWs.close();
-  }, []);
+    if (!streamSrc) return;
+    try {
+      const ipMatch = streamSrc.match(/(?:https?:\/\/)?([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/);
+      const ip = ipMatch ? ipMatch[1] : null;
+      if (!ip) {
+        console.warn("[ARES-01] Could not extract raw IP for WebSocket from:", streamSrc);
+        return;
+      }
+      
+      const wsUrl = `ws://${ip}:81/`;
+      console.log(`[ARES-01] Auto-init WebSocket telemetry to: ${wsUrl}`);
+      const telemetryWs = new WebSocket(wsUrl);
+      globalWs = telemetryWs;
+      
+      telemetryWs.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          setTelemetry(prev => ({
+            ...prev,
+            obstacle_distance: data.obstacle_distance !== undefined ? data.obstacle_distance : (data.distance !== undefined ? data.distance : prev.obstacle_distance),
+            battery_percentage: data.battery_percentage !== undefined ? data.battery_percentage : (data.battery !== undefined ? data.battery : prev.battery_percentage),
+            rssi: data.rssi !== undefined ? data.rssi : prev.rssi,
+            heap: data.heap !== undefined ? data.heap : prev.heap
+          }));
+        } catch (err) {}
+      };
+      
+      const resetTelemetry = () => {
+        setTelemetry(prev => ({
+          ...prev,
+          battery_percentage: null,
+          obstacle_distance: 0,
+          rssi: 0,
+          heap: 0
+        }));
+      };
+
+      telemetryWs.onclose = resetTelemetry;
+      telemetryWs.onerror = resetTelemetry;
+
+      return () => {
+        globalWs = null;
+        telemetryWs.close();
+      };
+    } catch (e) {
+      console.warn("Invalid streamSrc URL for WebSocket", e);
+    }
+  }, [streamSrc]);
 
   // Send camera URL to Python backend when available
   useEffect(() => {
@@ -1288,8 +1359,12 @@ export default function Dashboard() {
 
   const handleRoverModeToggle = useCallback(async (mode: "MANUAL" | "AUTONOMOUS") => {
     setRoverMode(mode);
+    setControlMode(mode === "AUTONOMOUS" ? "ai" : "manual");
+    if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+      globalWs.send(JSON.stringify({ command: "set_mode", mode }));
+    }
     await setNavigationMode(mode);
-  }, []);
+  }, [setControlMode]);
 
   // Sync mission status asynchronously
   useEffect(() => {
@@ -1305,31 +1380,36 @@ export default function Dashboard() {
   const [activeDirection, setActiveDirection] = useState<Direction | null>(null);
 
   const handleDirectionPress = useCallback(async (dir: Direction) => {
+    if (roverMode !== "MANUAL") {
+      toast.warning("Switch to MANUAL Mode to drive the rover.");
+      return;
+    }
     setActiveDirection(dir);
     const fbDir = dir.toUpperCase() as DriveDirection;
     setDriveDirection(fbDir);
     try {
       if (commandUrl) {
-        await sendCommandViaHttp(commandUrl, { type: "drive", command: fbDir, speed: 200 });
+        await sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: fbDir, speed: 255 });
       }
     } catch (err) {
       console.error("HTTP Drive Error:", err);
       toast.error(`Drive Error: ${err}`);
     }
-  }, [commandUrl]);
+  }, [commandUrl, roverMode]);
 
   const handleDirectionRelease = useCallback(async () => {
+    if (roverMode !== "MANUAL") return;
     setActiveDirection(null);
     setDriveDirection("STOP");
     try {
       if (commandUrl) {
-        await sendCommandViaHttp(commandUrl, { type: "drive", command: "STOP", speed: 200 });
+        await sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 });
       }
     } catch (err) {
       console.error("HTTP Drive Error:", err);
       toast.error(`Drive Error: ${err}`);
     }
-  }, [commandUrl]);
+  }, [commandUrl, roverMode]);
 
   const handleStop = useCallback(() => {
     setActiveDirection(null);
@@ -1365,46 +1445,39 @@ export default function Dashboard() {
       activeKeysRef.current.add(key);
 
       let dir: Direction;
-      let fbDir: DriveDirection;
       switch (key) {
         case "PageUp":
         case "ArrowUp":
         case "w":
         case "W":
           dir = "forward";
-          fbDir = "FORWARD";
           break;
         case "PageDown":
         case "ArrowDown":
         case "s":
         case "S":
           dir = "backward";
-          fbDir = "BACKWARD";
           break;
         case "Home":
         case "ArrowLeft":
         case "a":
         case "A":
           dir = "left";
-          fbDir = "LEFT";
           break;
         case "End":
         case "ArrowRight":
         case "d":
         case "D":
           dir = "right";
-          fbDir = "RIGHT";
           break;
         case " ":
           dir = "stop";
-          fbDir = "STOP";
           break;
         default:
           return;
       }
 
-      setActiveDirection(dir);
-      setDriveDirection(fbDir);
+      handleDirectionPress(dir);
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
@@ -1422,52 +1495,44 @@ export default function Dashboard() {
         activeKeysRef.current.delete(key);
         
         if (key === " " || activeKeysRef.current.size === 0) {
-          setActiveDirection(null);
-          setDriveDirection("STOP");
+          handleDirectionRelease();
         } else {
           // Transition to the next remaining active key
           const remainingKeys = Array.from(activeKeysRef.current);
           const nextKey = remainingKeys[remainingKeys.length - 1];
           let dir: Direction;
-          let fbDir: DriveDirection;
           switch (nextKey) {
             case "PageUp":
             case "ArrowUp":
             case "w":
             case "W":
               dir = "forward";
-              fbDir = "FORWARD";
               break;
             case "PageDown":
             case "ArrowDown":
             case "s":
             case "S":
               dir = "backward";
-              fbDir = "BACKWARD";
               break;
             case "Home":
             case "ArrowLeft":
             case "a":
             case "A":
               dir = "left";
-              fbDir = "LEFT";
               break;
             case "End":
             case "ArrowRight":
             case "d":
             case "D":
               dir = "right";
-              fbDir = "RIGHT";
               break;
             case " ":
               dir = "stop";
-              fbDir = "STOP";
               break;
             default:
               return;
           }
-          setActiveDirection(dir);
-          setDriveDirection(fbDir);
+          handleDirectionPress(dir);
         }
       }
     };
@@ -1475,8 +1540,7 @@ export default function Dashboard() {
     const handleBlur = () => {
       if (activeKeysRef.current.size > 0) {
         activeKeysRef.current.clear();
-        setActiveDirection(null);
-        setDriveDirection("STOP");
+        handleDirectionRelease();
       }
     };
 
@@ -1494,27 +1558,50 @@ export default function Dashboard() {
   // ── 5DOF Arm
   const [joints, setJoints] = useState<ArmAngles>(DEFAULT_JOINTS);
   const resetAnimRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  
+  const lastCommandTimeRef = useRef<number>(0);
+  const pendingCommandRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const sendThrottledCommand = useCallback((url: string, payload: any) => {
+    const now = Date.now();
+    if (now - lastCommandTimeRef.current < 100) {
+      if (!pendingCommandRef.current) {
+        pendingCommandRef.current = setTimeout(() => {
+          pendingCommandRef.current = null;
+          lastCommandTimeRef.current = Date.now();
+          sendCommandViaHttp(url, payload).catch(e => { console.error(e); toast.error(String(e)); });
+        }, 100);
+      }
+      return;
+    }
+    lastCommandTimeRef.current = now;
+    sendCommandViaHttp(url, payload).catch(e => { console.error(e); toast.error(String(e)); });
+  }, []);
 
   const updateJoint = useCallback((joint: keyof ArmAngles, delta: number) => {
     setJoints(prev => {
-      const nextAngle = Math.max(0, Math.min(180, prev[joint] + delta));
+      const nextAngle = Math.max(10, Math.min(170, prev[joint] + delta));
+      if (prev[joint] === nextAngle) return prev; // Prevent unnecessary dispatches when hitting bounds
       const next = { ...prev, [joint]: nextAngle };
-      if (roverIp) {
-        console.warn("Individual joint HTTP control not supported in monolithic firmware. Use macros.");
+      if (commandUrl) {
+        sendThrottledCommand(commandUrl, { mode: "manual", action: "arm_control", joint: joint, angle: nextAngle });
       }
       setArmAngles(next);
       return next;
     });
-  }, [roverIp]);
+  }, [commandUrl]);
 
   const setJointAngle = useCallback((joint: keyof ArmAngles, raw: number) => {
-    const val = Math.max(0, Math.min(180, raw));
+    const val = Math.max(10, Math.min(170, raw));
     setJoints(prev => {
       const next = { ...prev, [joint]: val };
+      if (commandUrl) {
+        sendThrottledCommand(commandUrl, { mode: "manual", action: "arm_control", joint: joint, angle: val });
+      }
       setArmAngles(next);
       return next;
     });
-  }, []);
+  }, [commandUrl]);
 
   const animateJointsTo = useCallback((target: ArmAngles, label: string) => {
     if (resetAnimRef.current) clearInterval(resetAnimRef.current);
@@ -1542,18 +1629,18 @@ export default function Dashboard() {
 
   const handleResetArm = useCallback(() => {
     animateJointsTo(DEFAULT_JOINTS, "Home (reset)");
-    if (commandUrl) sendCommandViaHttp(commandUrl, { type: "arm_macro", command: "HOME" }).catch(e => { console.error(e); toast.error(String(e)); });
+    if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
   }, [animateJointsTo, commandUrl]);
 
   const applyPreset = useCallback((p: typeof ARM_PRESETS[0]) => {
     animateJointsTo(p.joints, `Preset: ${p.name}`);
     if (commandUrl) {
       const macroCmd = p.name.toUpperCase();
-      sendCommandViaHttp(commandUrl, { type: "arm_macro", command: macroCmd }).catch(e => { console.error(e); toast.error(String(e)); });
+      sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: macroCmd, speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     }
   }, [animateJointsTo, commandUrl]);
 
-  const [stepSize, setStepSize] = useState<1 | 5 | 15>(5);
+  const [stepSize, setStepSize] = useState<number>(3);
   const [editingJoint, setEditingJoint] = useState<keyof ArmAngles | null>(null);
   const [editValue, setEditValue] = useState("");
   const startEdit = useCallback((j: keyof ArmAngles, v: number) => { setEditingJoint(j); setEditValue(String(v)); }, []);
@@ -1568,8 +1655,95 @@ export default function Dashboard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [directiveInput, setDirectiveInput] = useState("");
   const [aiLogs, setAiLogs] = useState<string[]>([
-    "> System online. Waiting for AI directive...",
+    `[SYS] AI Kernel Initialized. Ready for NLP routing.`
   ]);
+  const queueTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [activeQueue, setActiveQueue] = useState<{command: string, duration_ms: number, index: number, total: number} | null>(null);
+
+  // ── Autonomous Vision AI Pipeline ─────────────
+  useEffect(() => {
+    if (roverMode !== "AUTONOMOUS") return;
+    let isActive = true;
+    let timer: any;
+
+    const runVisionPoll = async () => {
+      try {
+        if (!streamSrc) return;
+        const captureUrl = streamSrc.replace('/stream', '/capture');
+        const res = await fetch(captureUrl, { cache: 'no-store' });
+        if (!res.ok) throw new Error("Capture failed");
+        const blob = await res.blob();
+        
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = async () => {
+          if (!isActive) return;
+          const base64data = reader.result as string;
+          const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+          if (!apiKey) {
+            setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [VISION ERROR] Groq API Key missing.`].slice(-8));
+            return;
+          }
+
+          const prompt = "You are a rover avoiding obstacles. Output strict JSON: {\"action\": \"FORWARD\" | \"LEFT\" | \"RIGHT\" | \"STOP\", \"reasoning\": \"brief reason\"}.";
+          const payload = {
+            model: "llama-3.2-11b-vision-preview",
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: prompt },
+                  { type: "image_url", image_url: { url: base64data } }
+                ]
+              }
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.1
+          };
+
+          try {
+            const apiRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify(payload)
+            });
+            const data = await apiRes.json();
+            if (!isActive) return;
+            if (data.choices && data.choices[0] && data.choices[0].message.content) {
+              const content = JSON.parse(data.choices[0].message.content);
+              const action = content.action;
+              setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [VISION] ${content.reasoning} -> ${action}`].slice(-8));
+              if (["FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP"].includes(action)) {
+                 await sendAutonomousCommand({ command: action, action: action, raw: `Vision AI: ${action}`, language: "en", timestamp: Date.now() });
+              }
+            }
+          } catch (e) {
+            console.error("Vision API Error:", e);
+            if (isActive) {
+               setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [VISION ERROR] Halt sequence initiated.`].slice(-8));
+               await sendAutonomousCommand({ command: "STOP", action: "STOP", raw: "Halt due to error", language: "en", timestamp: Date.now() });
+            }
+          }
+        };
+      } catch (e) {
+        console.error("Frame capture error:", e);
+      } finally {
+        if (isActive) {
+          timer = setTimeout(runVisionPoll, 2000);
+        }
+      }
+    };
+
+    runVisionPoll();
+
+    return () => {
+      isActive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [roverMode, streamSrc]);
   const [voiceLogs, setVoiceLogs] = useState<string[]>([
     "> Voice module online. Awaiting speech...",
   ]);
@@ -1598,9 +1772,10 @@ export default function Dashboard() {
   }, [voiceLogs]);
 
   const handleAiDirectiveSubmit = useCallback(async (overrideText?: string | any, source: "ai" | "voice" = "ai") => {
-    const textToProcess = typeof overrideText === 'string' ? overrideText : directiveInput;
-    if (typeof textToProcess !== 'string' || !textToProcess.trim() || isProcessing) return;
+    const rawTextToProcess = typeof overrideText === 'string' ? overrideText : directiveInput;
+    if (typeof rawTextToProcess !== 'string' || !rawTextToProcess.trim() || isProcessing) return;
 
+    const textToProcess = normalizeBengaliNumbers(rawTextToProcess);
     setIsProcessing(true);
     if (!overrideText) setDirectiveInput("");
 
@@ -1618,26 +1793,27 @@ export default function Dashboard() {
       pipelineTasks.push(`[${timestamp}] [AI] Routing to Groq llama-3.1-8b-instant model...`);
 
       const systemPrompt = `You are the onboard AI commander for ARES-01, a 6-wheeled robotic rover with a 5-DOF robotic arm.
-Your sole job is to analyze the operator's natural language command (which may be in Bengali or English) and output a strict JSON response.
+Your sole job is to analyze the operator's natural language command (which may be in Bengali or English) and output a strict JSON response representing a timed execution plan.
 
 AVAILABLE COMMANDS:
 - Locomotion: FORWARD, BACKWARD, LEFT, RIGHT, STOP
 - Arm macros: PICKUP, DROP, HOME
 
-OUTPUT FORMAT (strict JSON, no markdown, no explanation):
+OUTPUT FORMAT (strict JSON, no markdown):
 {
-  "actions": [
-    { "type": "drive", "command": "FORWARD" },
-    { "type": "arm_macro", "command": "PICKUP" }
+  "plan": [
+    { "command": "FORWARD", "duration_ms": 3000 }
   ],
-  "summary": "Human-readable mission summary in English (1 sentence)"
+  "summary": "Mission summary in English"
 }
 
 RULES:
-1. "actions" array can have 0 to N actions.
-2. If the command is ambiguous or not related to rover control, return an empty actions array.
-3. Map Bengali words: সামনে/এগিয়ে/যাও→FORWARD, পিছনে/পেছনে→BACKWARD, বামে→LEFT, ডানে→RIGHT, থামো/দাঁড়াও→STOP, তোলো/ধরো/নাও→PICKUP, ছাড়ো/ফেলো→DROP, হোম/রিসেট→HOME.
-4. Always output valid JSON only. No extra text before or after.`;
+1. Extract durations. 1 second = 1000 duration_ms. 1 minute = 60000.
+2. If distance is given, assume 1 meter = 3000 duration_ms.
+3. If no duration is specified, use 1000 for safety.
+4. ALWAYS append a final action with { "command": "STOP", "duration_ms": 0 } at the end of every multi-step sequence to prevent runaway.
+5. Bengali words: সামনে/এগিয়ে→FORWARD, পিছনে→BACKWARD, বামে→LEFT, ডানে→RIGHT, থামো→STOP, সেকেন্ড→seconds, মিনিট→minutes.
+6. Always output valid JSON only. No extra text before or after.`;
 
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
@@ -1661,7 +1837,7 @@ RULES:
             ],
             response_format: { type: "json_object" },
             temperature: 0.1,
-            max_tokens: 256,
+            max_tokens: 512,
           }),
         });
 
@@ -1679,50 +1855,72 @@ RULES:
 
         pipelineTasks.push(`[${timestamp}] [AI] Model response received. Parsing action sequence...`);
 
-        // Parse the JSON response from Groq
         const parsed = JSON.parse(rawText);
-        const actions: { type: string; command: string }[] = parsed.actions || [];
+        const plan: { command: string; duration_ms: number }[] = parsed.plan || [];
         const summary: string = parsed.summary || "No summary provided.";
 
-        if (actions.length === 0) {
+        if (plan.length === 0) {
           pipelineTasks.push(`[${timestamp}] [AI] Model returned no actionable commands. Summary: ${summary}`);
-        }
-
-        // Execute each action via Tauri IPC
-        for (const action of actions) {
-          const cmd = action.command?.toUpperCase();
-          if (action.type === "drive") {
-            const validDrive = ["FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP"];
-            if (validDrive.includes(cmd)) {
-              pipelineTasks.push(`[${timestamp}] [NAV] AI Propulsion → ${cmd}`);
-              setDriveDirection(cmd as DriveDirection);
-              if (commandUrl) {
-                try { await sendCommandViaHttp(commandUrl, { type: "drive", command: cmd, speed: 200 }); }
-                catch (e) { console.error(e); toast.error(String(e)); }
-              }
-              if (cmd === "STOP") setAiTaskState("idle");
-            }
-          } else if (action.type === "arm_macro") {
-            const validArm = ["PICKUP", "DROP", "HOME"];
-            if (validArm.includes(cmd)) {
-              pipelineTasks.push(`[${timestamp}] [ARM] AI Manipulator → ${cmd}`);
-              if (cmd === "PICKUP") {
-                setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
-              } else if (cmd === "DROP") {
-                setJoints(prev => ({ ...prev, gripper: 0 }));
-              } else if (cmd === "HOME") {
-                setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
-              }
-              if (commandUrl) {
-                try { await sendCommandViaHttp(commandUrl, { type: "arm_macro", command: cmd }); }
-                catch (e) { console.error(e); toast.error(String(e)); }
-              }
-            }
+        } else {
+          pipelineTasks.push(`[${timestamp}] [AI] Executing ${plan.length} steps. Summary: ${summary}`);
+          
+          if (queueTimerRef.current) {
+            clearTimeout(queueTimerRef.current);
+            queueTimerRef.current = null;
           }
+
+          const runQueue = async () => {
+            for (let i = 0; i < plan.length; i++) {
+              const step = plan[i];
+              const cmd = step.command?.toUpperCase();
+              
+              const isArm = ["PICKUP", "DROP", "HOME"].includes(cmd);
+              const isDrive = ["FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP"].includes(cmd);
+              
+              if (isDrive || isArm) {
+                const prefix = isArm ? "[ARM]" : "[NAV]";
+                const logMsg = `[${new Date().toLocaleTimeString()}] ${prefix} Executing Step ${i + 1}/${plan.length}: ${cmd} (${step.duration_ms}ms)`;
+                setAiLogs(prev => [...prev, logMsg].slice(-8));
+                setActiveQueue({ command: cmd, duration_ms: step.duration_ms, index: i + 1, total: plan.length });
+
+                if (isDrive) {
+                  setDriveDirection(cmd as DriveDirection);
+                  if (commandUrl) {
+                    try { await sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: cmd, speed: 255 }); }
+                    catch (e) { console.error(e); }
+                  }
+                  if (cmd === "STOP") setAiTaskState("idle");
+                } else if (isArm) {
+                  if (cmd === "PICKUP") {
+                    setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
+                  } else if (cmd === "DROP") {
+                    setJoints(prev => ({ ...prev, gripper: 90 }));
+                  } else if (cmd === "HOME") {
+                    setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
+                  }
+                  if (commandUrl) {
+                    try { await sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: cmd, speed: 255 }); }
+                    catch (e) { console.error(e); }
+                  }
+                }
+
+                if (step.duration_ms > 0) {
+                  await new Promise(resolve => { queueTimerRef.current = setTimeout(resolve, step.duration_ms) });
+                }
+              }
+            }
+            setActiveQueue(null);
+            setAiTaskState("idle");
+            if (commandUrl) {
+               try { await sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }); }
+               catch (e) {}
+            }
+          };
+          runQueue();
         }
 
         pipelineTasks.push(`[${timestamp}] [AI] Mission Summary: ${summary}`);
-        pipelineTasks.push(`[${timestamp}] [SYS] Groq-powered sequence executed (${actions.length} action${actions.length !== 1 ? 's' : ''}).`);
+        pipelineTasks.push(`[${timestamp}] [SYS] Groq-powered queue dispatched (${plan.length} step${plan.length !== 1 ? 's' : ''}).`);
 
       } catch (err: any) {
         if (err.name === 'AbortError') {
@@ -1770,23 +1968,23 @@ RULES:
     if (['সাম', 'আগা', 'এগি', 'forw', 'ahead', 'go'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: FORWARD.`);
       setDriveDirection("FORWARD");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "drive", command: "FORWARD", speed: 200 }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "FORWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['পিছ', 'পেছ', 'পিছা', 'back', 'rev'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: BACKWARD.`);
       setDriveDirection("BACKWARD");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "drive", command: "BACKWARD", speed: 200 }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "BACKWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['বামে', 'বাম', 'left'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: LEFT.`);
       setDriveDirection("LEFT");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "drive", command: "LEFT", speed: 200 }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "LEFT", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['ডানে', 'ডান', 'right'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: RIGHT.`);
       setDriveDirection("RIGHT");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "drive", command: "RIGHT", speed: 200 }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "RIGHT", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['থামো', 'দাঁড়াও', 'stop', 'halt', 'break'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system halted: STOP.`);
       setDriveDirection("STOP");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "drive", command: "STOP", speed: 200 }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
       setAiTaskState("idle");
     }
 
@@ -1799,15 +1997,15 @@ RULES:
     if (['তোল', 'তুল', 'উঠ', 'ওঠ', 'নাও', 'ধর', 'pick', 'grab'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [ARM] Inverse kinematics matrix resolved. Actuating manipulator: PICKUP.`);
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
-      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "arm_macro", command: "PICKUP" }).catch(e => { console.error(e); toast.error(String(e)); });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['ছাড', 'ছাড়', 'নামা', 'ফেল', 'drop', 'releas'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
-      setJoints(prev => ({ ...prev, gripper: 0 }));
-      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "arm_macro", command: "DROP" }).catch(e => { console.error(e); toast.error(String(e)); });
+      setJoints(prev => ({ ...prev, gripper: 90 }));
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'home', 'reset'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
-      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
-      if (commandUrl) sendCommandViaHttp(commandUrl, { type: "arm_macro", command: "HOME" }).catch(e => { console.error(e); toast.error(String(e)); });
+      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     }
 
     // Status
@@ -1825,7 +2023,7 @@ RULES:
   // ── Voice
   const [isListening, setIsListening] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState("");
-  const [voiceLanguage, setVoiceLanguageState] = useState("bn-IN");
+  const [voiceLanguage, setVoiceLanguageState] = useState("bn-BD");
   const setVoiceLanguage = useCallback(async (lang: string) => {
     setVoiceLanguageState(lang);
     await setFirebaseLanguage(lang);
@@ -2071,8 +2269,8 @@ RULES:
       // Rule 2: Contains a slash (custom path), prepend http:// but keep path intact
       finalUrl = `http://${url}`;
     } else {
-      // Default: Plain host/IP, prepend http:// and append :81/stream
-      finalUrl = `http://${url}:81/stream`;
+      // Default: Plain host/IP, prepend http:// and append /stream (port 80 default)
+      finalUrl = `http://${url}/stream`;
     }
     
     // Cache bust to prevent shared image cache pool accumulation
@@ -2083,6 +2281,39 @@ RULES:
     setStreamError(false);
     setStreamSrc(finalUrl);
   }, [roverIp]);
+
+  const handleConnectCommand = useCallback(() => {
+    if (!commandUrl.trim()) return;
+    let url = commandUrl.trim();
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      url = `http://${url}`;
+    }
+    setCommandUrl(url);
+
+    const match = url.match(/https?:\/\/([^:/]+)/);
+    const ip = match ? match[1] : "";
+    
+    // Non-blocking ping using fetch detached from UI thread
+    const startTime = performance.now();
+    fetch(url, { method: "GET", mode: "no-cors", cache: "no-store" })
+      .then(() => {
+        const latency = Math.round(performance.now() - startTime);
+        setPing(latency);
+        setRoverOnline(true);
+        toast.success("Connected to Command Endpoint");
+
+        if (ip) {
+          setRoverIp(ip);
+          setStreamError(false);
+          setStreamSrc(`http://${ip}/stream?cb=${Date.now()}`);
+        }
+      })
+      .catch((err) => {
+        setRoverOnline(false);
+        setPing(null);
+        toast.error("Failed to connect to Command Endpoint");
+      });
+  }, [commandUrl]);
 
   const handleDisconnectCamera = useCallback(() => {
     setStreamSrc(null);
@@ -2119,6 +2350,7 @@ RULES:
         streamError={streamError}
         handleConnectCamera={handleConnectCamera}
         handleDisconnectCamera={handleDisconnectCamera}
+        handleConnectCommand={handleConnectCommand}
         commandUrl={commandUrl}
         setCommandUrl={setCommandUrl}
         ping={ping}
@@ -2127,9 +2359,11 @@ RULES:
         rssi={rssi}
       />
 
-      {/* Camera View Section (Top - Max 48dvh Viewport Height Budget) */}
-      {/* Camera View Section (Top - Max 48dvh Viewport Height Budget) */}
-      <div className="flex-1 min-h-0 relative bg-black/90 w-full z-10">
+      {/* Main Layout - Split Screen on lg */}
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0 w-full z-10">
+        
+        {/* LEFT COLUMN: Camera View Section */}
+        <div className="w-full lg:w-[55%] flex-shrink-0 flex flex-col relative bg-transparent z-10 h-[50vh] lg:h-full border-b lg:border-b-0 lg:border-r border-border/50">
         <style>{`
           @keyframes geminiGradient {
             0% { background-position: 0% 50%; }
@@ -2332,31 +2566,78 @@ RULES:
           }
         `}</style>
 
-        {/* Ambient Auroras */}
-        <div className="absolute -top-10 -left-10 w-72 h-72 rounded-full bg-gradient-to-br from-indigo-500/20 via-purple-500/20 to-pink-500/20 blur-[80px] pointer-events-none float-blob-1" />
-        <div className="absolute -bottom-16 -right-16 w-80 h-80 rounded-full bg-gradient-to-br from-blue-500/20 via-teal-500/20 to-indigo-500/20 blur-[90px] pointer-events-none float-blob-2" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] h-[80%] rounded-full bg-gradient-to-tr from-purple-600/5 via-blue-600/5 to-teal-500/5 blur-[100px] pointer-events-none animate-pulse" style={{ animationDuration: "8s" }} />
+        {/* Central Widescreen Camera Frame */}
+        <div className="flex-[1] w-[98%] mx-auto flex flex-row justify-between items-end pb-2">
+          {/* Top Overlays */}
+          <div className="flex items-center gap-2 pointer-events-none">
+            <div className={`flex items-center gap-2 bg-black/40 backdrop-blur-xl border border-white/20 rounded-lg shadow-[0_4px_30px_rgba(0,0,0,0.5)] px-3 py-1.5 transition-all duration-500 ${streamSrc && !streamError ? "shadow-[0_0_15px_rgba(74,222,128,0.2)] border-green-500/40" : ""}`}>
+              <span className={`w-2 h-2 rounded-full transition-colors duration-500 ${streamSrc && !streamError ? "bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.8)] animate-pulse" : "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)]"}`} />
+              <span className="text-white text-xs font-semibold tracking-wide uppercase">{streamSrc && !streamError ? "Live Feed" : "No Signal"}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 pointer-events-none">
+            {rssi !== undefined && (
+              <div className="flex items-center gap-1.5 bg-black/40 backdrop-blur-xl border border-white/20 rounded-lg shadow-[0_4px_30px_rgba(0,0,0,0.5)] px-3 py-1.5">
+                <Signal className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="text-white font-mono text-xs font-bold tracking-wider">{rssi} dBm</span>
+              </div>
+            )}
+            <div className={`flex items-center gap-1.5 bg-black/40 backdrop-blur-xl border border-white/20 rounded-lg shadow-[0_4px_30px_rgba(0,0,0,0.5)] px-3 py-1.5 transition-all duration-500 ${telemetry.battery_percentage !== null && telemetry.battery_percentage < 20 ? "shadow-[0_0_15px_rgba(239,68,68,0.4)] border-red-500/50 animate-pulse" : ""}`}>
+                <Zap className={`w-3.5 h-3.5 ${telemetry.battery_percentage !== null && telemetry.battery_percentage < 20 ? 'text-red-400' : 'text-green-400'}`} />
+                <span className="text-white font-mono text-xs font-bold tracking-wider">{telemetry.battery_percentage !== null ? telemetry.battery_percentage.toFixed(0) + '%' : '--%'}</span>
+            </div>
+            {telemetry.obstacle_distance !== undefined && (
+              <div className="flex items-center gap-1.5 bg-black/40 backdrop-blur-xl border border-white/20 rounded-lg shadow-[0_4px_30px_rgba(0,0,0,0.5)] px-3 py-1.5">
+                <Ruler className="w-3.5 h-3.5 text-blue-400" />
+                <span className="text-white font-mono text-xs font-bold tracking-wider">{telemetry.obstacle_distance} cm</span>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex-[4] w-[98%] mx-auto relative flex items-center justify-center overflow-hidden">
+          <div className="w-full h-full relative flex items-center justify-center bg-black overflow-hidden shadow-2xl rounded-xl border border-white/10">
+            {/* Ambient Auroras restricted to the 16:9 container */}
+            <div className="absolute -top-10 -left-10 w-72 h-72 rounded-full bg-gradient-to-br from-indigo-500/20 via-purple-500/20 to-pink-500/20 blur-[80px] pointer-events-none float-blob-1" />
+            <div className="absolute -bottom-16 -right-16 w-80 h-80 rounded-full bg-gradient-to-br from-blue-500/20 via-teal-500/20 to-indigo-500/20 blur-[90px] pointer-events-none float-blob-2" />
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] h-[80%] rounded-full bg-gradient-to-tr from-purple-600/5 via-blue-600/5 to-teal-500/5 blur-[100px] pointer-events-none animate-pulse" style={{ animationDuration: "8s" }} />
 
-        {/* Central Widescreen Camera Frame (Absolute Inset Hack) */}
-        <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
-          <CameraView
-            streamSrc={streamSrc}
-            streamError={streamError}
-            rssi={rssi}
-            solar={solar}
-            distance={telemetry.obstacle_distance}
-            setStreamError={setStreamError}
-          />
+            <CameraView
+              streamSrc={streamSrc}
+              streamError={streamError}
+              rssi={rssi}
+              solar={solar}
+              distance={telemetry.obstacle_distance}
+              setStreamError={setStreamError}
+            />
+          </div>
+        </div>
+        <div className="flex-[1] w-[98%] mx-auto flex flex-row justify-center items-start pt-4 gap-4">
           <CameraOverlay 
             onCapturePhoto={handleCapturePhoto} 
             onRecordVideo={handleRecordVideo} 
             isRecording={isRecording} 
           />
+          {telemetry.obstacle_distance !== undefined && (
+            <div className={`w-72 flex-shrink-0 pointer-events-none flex flex-col items-center justify-center gap-2 bg-black/40 backdrop-blur-xl p-3 rounded-xl border transition-all duration-300 shadow-[0_4px_30px_rgba(0,0,0,0.5)] ${telemetry.obstacle_distance < 15 ? 'border-red-500/50 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : telemetry.obstacle_distance < 30 ? 'border-yellow-500/50' : 'border-white/20'}`}>
+              <div className="w-full flex justify-between text-xs font-mono font-bold uppercase tracking-widest text-white/90">
+                <span>Proximity</span>
+                <span className={`transition-colors ${telemetry.obstacle_distance < 15 ? 'text-red-400 animate-pulse' : telemetry.obstacle_distance < 30 ? 'text-yellow-400' : 'text-green-400'}`}>
+                  {telemetry.obstacle_distance < 15 ? "BRAKE" : telemetry.obstacle_distance.toFixed(1) + " cm"}
+                </span>
+              </div>
+              <div className="w-full h-2 bg-black/60 rounded-full overflow-hidden border border-white/5 relative shadow-inner">
+                <div 
+                  className={`absolute left-0 top-0 bottom-0 transition-all duration-300 bg-gradient-to-r ${telemetry.obstacle_distance < 15 ? 'from-red-600 to-red-400 shadow-[0_0_10px_rgba(239,68,68,1)]' : telemetry.obstacle_distance < 30 ? 'from-yellow-600 to-yellow-400' : 'from-green-600 to-green-400'}`}
+                  style={{ width: `${Math.min(100, Math.max(0, (100 - telemetry.obstacle_distance)))}%` }} 
+                />
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+        </div>
 
-      {/* Interactive Control Section (Middle - Max 42dvh Viewport Height Budget) */}
-      <div className="h-[380px] shrink-0 pb-6 pt-2 overflow-y-auto overflow-x-hidden flex flex-col bg-background z-10">
+        {/* RIGHT COLUMN: Interactive Control Section */}
+        <div className="w-full lg:w-[45%] flex-1 overflow-y-auto overflow-x-hidden flex flex-col bg-background z-10 pb-6 pt-2">
         
         {/* 2. MODE SELECTOR TABS */}
         <div className="shrink-0 px-4 pt-4 md:pt-2.5 pb-2 bg-transparent z-10">
@@ -2387,20 +2668,10 @@ RULES:
               <motion.div key="manual"
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
-                className={`px-4 py-3 md:h-full md:overflow-hidden flex items-center justify-center ${roverMode === "AUTONOMOUS" ? "pointer-events-none opacity-30" : ""}`}>
-                <div className="your-main-control-container flex flex-col md:flex-row items-center justify-center gap-6 md:gap-8 w-full max-w-5xl mx-auto py-4 px-2">
-                  {/* LEFT: Drive D-Pad */}
-                  <div className="drive-control-section shrink-0 w-[240px] h-[240px] bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-3 backdrop-blur-md shadow-lg relative">
-                    <DPad
-                      activeDirection={activeDirection}
-                      onPress={handleDirectionPress}
-                      onRelease={handleDirectionRelease}
-                      onStop={handleStop}
-                    />
-                  </div>
-
-                  {/* RIGHT: 5DOF Arm */}
-                  <div className="arm-control-section shrink-0 w-full max-w-[480px] flex flex-col items-center justify-center">
+                className={`px-4 py-3 md:h-full md:overflow-x-hidden md:overflow-y-auto flex items-start justify-center ${roverMode === "AUTONOMOUS" ? "pointer-events-none opacity-30" : ""}`}>
+                <div className="your-main-control-container flex flex-col items-center justify-start gap-2 w-full max-w-md mx-auto py-1 px-1 mt-1">
+                  {/* TOP: 5DOF Arm */}
+                  <div className="arm-control-section shrink-0 w-full max-w-[360px] flex flex-col items-center justify-center">
                     <ArmControls
                       joints={joints}
                       setJointAngle={setJointAngle}
@@ -2417,6 +2688,16 @@ RULES:
                       startEdit={startEdit}
                     />
                   </div>
+
+                  {/* BOTTOM: Drive D-Pad */}
+                  <div className="drive-control-section shrink-0 w-[240px] h-[240px] bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-3 backdrop-blur-md shadow-lg relative pb-8">
+                    <DPad
+                      activeDirection={activeDirection}
+                      onPress={handleDirectionPress}
+                      onRelease={handleDirectionRelease}
+                      onStop={handleStop}
+                    />
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -2426,9 +2707,9 @@ RULES:
               <motion.div key="ai"
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
-                className="p-3 overflow-hidden h-full flex flex-col animate-none">
-                <div className="flex flex-col lg:flex-row w-full justify-end items-center gap-12 lg:gap-16 p-4 max-w-full">
-                  {/* LEFT SIDE (Controls) */}
+                className="p-3 overflow-y-auto h-full flex flex-col animate-none">
+                <div className="flex flex-col w-full justify-start items-center gap-8 p-4 max-w-full pb-8">
+                  {/* TOP SIDE (Controls) */}
                   <div className="flex justify-center items-center">
                     <div className="w-full max-w-md flex flex-col gap-4">
                       <div className="text-center">
@@ -2466,11 +2747,19 @@ RULES:
                     </div>
                   </div>
                   
-                  {/* RIGHT SIDE (Logs) */}
-                  <div className="w-[400px] flex justify-end shrink-0">
+                  {/* BOTTOM SIDE (Logs) */}
+                  <div className="w-full max-w-[400px] flex justify-center shrink-0">
                     <div className="flex flex-col shrink-0 w-[400px] h-[260px] bg-muted/5 p-3 rounded-2xl border border-border/50 shadow-sm relative">
                       <div className="flex justify-between items-center mb-1">
-                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">AI Directives Log</div>
+                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                          AI Directives Log
+                          {activeQueue && (
+                            <div className="flex items-center gap-1.5 bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 text-[9px] font-bold">
+                              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                              <span>STEP {activeQueue.index}/{activeQueue.total}: {activeQueue.command}</span>
+                            </div>
+                          )}
+                        </div>
                         <div className="flex items-center justify-between h-4">
                           {isProcessing ? (
                             <div className="flex items-center gap-1 text-[9px] font-mono text-primary font-semibold tracking-wider animate-pulse">
@@ -2513,9 +2802,9 @@ RULES:
               <motion.div key="voice"
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
-                className="p-3 overflow-hidden h-full flex flex-col animate-none">
-                <div className="flex flex-col lg:flex-row w-full justify-end items-center gap-12 lg:gap-16 p-4 max-w-full">
-                  {/* LEFT SIDE (Controls) */}
+                className="p-3 overflow-y-auto h-full flex flex-col animate-none">
+                <div className="flex flex-col w-full justify-start items-center gap-8 p-4 max-w-full pb-8">
+                  {/* TOP SIDE (Controls) */}
                   <div className="flex justify-center items-center">
                     <div className="w-full sm:w-[420px] max-w-full flex flex-col items-center px-5 pt-4 pb-2 gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl relative overflow-hidden select-none">
                       <div className="flex items-center justify-between w-full border-b border-slate-100 dark:border-slate-800 pb-3">
@@ -2571,8 +2860,8 @@ RULES:
                     </div>
                   </div>
 
-                  {/* RIGHT SIDE (Logs) */}
-                  <div className="w-[400px] flex justify-end shrink-0">
+                  {/* BOTTOM SIDE (Logs) */}
+                  <div className="w-full max-w-[400px] flex justify-center shrink-0">
                     <div className="flex flex-col shrink-0 w-[400px] h-[260px] bg-muted/5 p-3 rounded-2xl border border-border/50 shadow-sm relative">
                       <div className="flex justify-between items-center mb-1">
                         <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Voice Commands Log</div>
@@ -2608,8 +2897,7 @@ RULES:
           </AnimatePresence>
         </div>
       </div>
-
-
+      </div>
     </div>
   );
 }

@@ -50,8 +50,8 @@ Rules:
 OUTPUT FORMAT:
 {
   "actions": [
-    { "type": "drive", "command": "FORWARD", "speed": 200 },
-    { "type": "arm_macro", "command": "PICKUP" }
+    { "mode": "manual", "action": "drive", "direction": "FORWARD", "speed": 255 },
+    { "mode": "manual", "action": "arm_control", "joint": "shoulder", "angle": 90 }
   ],
   "summary": "Brief analysis description"
 }
@@ -132,7 +132,7 @@ Rules:
 OUTPUT FORMAT:
 {
   "actions": [
-    { "type": "autonomous", "command": "FORWARD", "speed": 200 }
+    { "mode": "autonomous", "action": "drive", "direction": "FORWARD", "speed": 255 }
   ],
   "summary": "Visual path description"
 }

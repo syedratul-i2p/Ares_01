@@ -44,6 +44,7 @@ dependencies:
   tflite_flutter: ^0.12.1
   http: ^1.6.0
   image: ^4.9.1
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:

@@ -5,115 +5,152 @@
 
 HardwareController Hardware;
 
-HardwareController::HardwareController() : pwm1(0x40), pwm2(0x41) {}
+HardwareController::HardwareController() {}
 
 void HardwareController::begin() {
-    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 100000);
+    delay(50);
     
-    // Initialize PCA9685 - 1 (Wheels)
-    pwm1.begin();
-    pwm1.setOscillatorFrequency(27000000);
-    pwm1.setPWMFreq(1600); // 1.6 kHz for motor driver
+    // Initialize PCA9685 - 1 (Chassis) at 0x40
+    pca1.begin();
+    pca1.setOscillatorFrequency(27000000);
+    pca1.setPWMFreq(1000);
+    
+    // Initialize PCA9685 - 2 (Arm) at 0x41 on the SAME bus
+    pca2.begin();
+    pca2.setOscillatorFrequency(27000000);
+    pca2.setPWMFreq(1000);
+    
+    Serial.println("[SYS] Dual PCA9685 Daisy-Chain Initialized on Wire.");
 
-    // Initialize PCA9685 - 2 (Arm)
-    pwm2.begin();
-    pwm2.setOscillatorFrequency(27000000);
-    pwm2.setPWMFreq(1600); 
-    
     // Initialize Sensors
     pinMode(HC_SR04_TRIG_PIN, OUTPUT);
     pinMode(HC_SR04_ECHO_PIN, INPUT);
-    // ADC configuration is usually handled by analogRead on ESP32
+    // Configure ADC for ESP32-S3 (12-bit by default, but set 11db attenuation for 0-3.3V range)
+    analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);
     
     // Ensure all motors are initially stopped
     drive(0, 0);
-    for(int i = 0; i < 5; i++) {
-        setArmMotor(i, 0);
-    }
+    setArmMotor("base", 90);
+    setArmMotor("shoulder", 90);
+    setArmMotor("elbow", 90);
+    setArmMotor("wrist", 90);
+    setArmMotor("gripper", 90);
+
+    // Pull STBY HIGH for TB6612FNG on PCA1 Pin 15 (if used)
+    pca1.setPWM(15, 4096, 0);
 }
 
 void HardwareController::setPWM(Adafruit_PWMServoDriver &pwm, uint8_t channel, uint16_t on, uint16_t off) {
     pwm.setPWM(channel, on, off);
 }
 
-void HardwareController::drive(int speedLeft, int speedRight) {
-    // Constraint speed between -4095 and 4095 (12-bit PCA9685)
-    speedLeft = constrain(speedLeft, -4095, 4095);
-    speedRight = constrain(speedRight, -4095, 4095);
+void HardwareController::setMotorState(Adafruit_PWMServoDriver &pca, int pwmPin, int in1Pin, int in2Pin, int uiValue) {
+    int speed = 0;
+    bool dirForward = true;
+    
+    // Minimum PWM required to overcome gravity and mechanical inertia (approx 85% power)
+    int MIN_PWM = 3500; 
 
-    // LEFT WHEELS (L298N #1) -> Front: ENA(0), IN1(1), IN2(2) | Rear: IN3(3), IN4(4), ENB(5)
-    if (speedLeft == 0) {
-        setPWM(pwm1, 1, 0, 0); setPWM(pwm1, 2, 0, 0); setPWM(pwm1, 0, 0, 0);
-        setPWM(pwm1, 3, 0, 0); setPWM(pwm1, 4, 0, 0); setPWM(pwm1, 5, 0, 0);
-    } else if (speedLeft > 0) {
-        setPWM(pwm1, 1, 4096, 0); setPWM(pwm1, 2, 0, 4096); setPWM(pwm1, 0, 0, speedLeft);
-        setPWM(pwm1, 3, 4096, 0); setPWM(pwm1, 4, 0, 4096); setPWM(pwm1, 5, 0, speedLeft);
+    if (uiValue > 91) {
+        // Map 91-180 strictly to MIN_PWM-4095
+        speed = map(uiValue, 91, 180, MIN_PWM, 4095);
+        dirForward = true;
+    } else if (uiValue < 89) {
+        // Map 89-0 strictly to MIN_PWM-4095
+        speed = map(uiValue, 89, 0, MIN_PWM, 4095);
+        dirForward = false;
     } else {
-        setPWM(pwm1, 1, 0, 4096); setPWM(pwm1, 2, 4096, 0); setPWM(pwm1, 0, 0, -speedLeft);
-        setPWM(pwm1, 3, 0, 4096); setPWM(pwm1, 4, 4096, 0); setPWM(pwm1, 5, 0, -speedLeft);
+        // Strict Deadband for 89, 90, 91
+        speed = 0; 
     }
 
-    // RIGHT WHEELS (L298N #2) -> Front: ENA(6), IN1(7), IN2(8) | Rear: IN3(9), IN4(10), ENB(11)
-    if (speedRight == 0) {
-        setPWM(pwm1, 7, 0, 0); setPWM(pwm1, 8, 0, 0); setPWM(pwm1, 6, 0, 0);
-        setPWM(pwm1, 9, 0, 0); setPWM(pwm1, 10, 0, 0); setPWM(pwm1, 11, 0, 0);
-    } else if (speedRight > 0) {
-        setPWM(pwm1, 7, 4096, 0); setPWM(pwm1, 8, 0, 4096); setPWM(pwm1, 6, 0, speedRight);
-        setPWM(pwm1, 9, 4096, 0); setPWM(pwm1, 10, 0, 4096); setPWM(pwm1, 11, 0, speedRight);
+    if (speed == 0) {
+        pca.setPWM(in1Pin, 0, 4096); 
+        pca.setPWM(in2Pin, 0, 4096); 
+        pca.setPWM(pwmPin, 0, 4096); 
     } else {
-        setPWM(pwm1, 7, 0, 4096); setPWM(pwm1, 8, 4096, 0); setPWM(pwm1, 6, 0, -speedRight);
-        setPWM(pwm1, 9, 0, 4096); setPWM(pwm1, 10, 4096, 0); setPWM(pwm1, 11, 0, -speedRight);
+        if (dirForward) {
+            pca.setPWM(in1Pin, 4096, 0); 
+            pca.setPWM(in2Pin, 0, 4096); 
+        } else {
+            pca.setPWM(in1Pin, 0, 4096); 
+            pca.setPWM(in2Pin, 4096, 0); 
+        }
+        pca.setPWM(pwmPin, 0, speed);
+    }
+    
+    if (pwmPin == 9) { // Gripper specific logic log
+        int in3 = (speed == 0) ? 0 : (dirForward ? 4096 : 0);
+        int in4 = (speed == 0) ? 0 : (dirForward ? 0 : 4096);
+        Serial.printf("[GRIPPER] V: %d, PWM: %d, IN3: %d, IN4: %d\n", uiValue, (speed == 0 ? 0 : speed), in3, in4);
     }
 }
 
-void HardwareController::setArmMotor(uint8_t joint, int speed) {
-    speed = constrain(speed, -4095, 4095);
+void HardwareController::drive(int speedLeft, int speedRight) {
+    int leftUi = map(speedLeft, -255, 255, 0, 180);
+    int rightUi = map(speedRight, -255, 255, 0, 180);
 
-    Adafruit_PWMServoDriver* target_pwm;
-    uint8_t ch_pwm, ch_in1, ch_in2;
-
-    switch (joint) {
-        case 0: // Arm Joint 1 / Base (L298N #3 on PCA-1)
-            target_pwm = &pwm1;
-            ch_pwm = 12; ch_in1 = 13; ch_in2 = 14;
-            break;
-        case 1: // Arm Joint 2 / Shoulder (TB6612 #1 on PCA-2)
-            target_pwm = &pwm2;
-            ch_pwm = 0; ch_in1 = 1; ch_in2 = 2;
-            break;
-        case 2: // Arm Joint 3 / Elbow (TB6612 #1 on PCA-2)
-            target_pwm = &pwm2;
-            ch_pwm = 3; ch_in1 = 4; ch_in2 = 5;
-            break;
-        case 3: // Arm Joint 4 / Wrist (TB6612 #2 on PCA-2)
-            target_pwm = &pwm2;
-            ch_pwm = 6; ch_in1 = 7; ch_in2 = 8;
-            break;
-        case 4: // Arm Joint 5 / Gripper (TB6612 #2 on PCA-2)
-            target_pwm = &pwm2;
-            ch_pwm = 9; ch_in1 = 10; ch_in2 = 11;
-            break;
-        default:
-            return;
-    }
+    // Left Wheels (Inverted: IN2/IN4 is Forward)
+    setMotorState(pca1, 0, 2, 1, leftUi); // FL Wheel
+    setMotorState(pca1, 5, 4, 3, leftUi); // BL Wheel
     
-    if (speed == 0) {
-        setPWM(*target_pwm, ch_in1, 0, 0);
-        setPWM(*target_pwm, ch_in2, 0, 0);
-        setPWM(*target_pwm, ch_pwm, 0, 0);
-    } else if (speed > 0) {
-        setPWM(*target_pwm, ch_in1, 4096, 0);
-        setPWM(*target_pwm, ch_in2, 0, 4096);
-        setPWM(*target_pwm, ch_pwm, 0, speed);
-    } else {
-        setPWM(*target_pwm, ch_in1, 0, 4096);
-        setPWM(*target_pwm, ch_in2, 4096, 0);
-        setPWM(*target_pwm, ch_pwm, 0, -speed);
-    }
+    // Right Wheels (Inverted: IN2/IN4 is Forward)
+    setMotorState(pca1, 6, 8, 7, rightUi); // FR Wheel
+    setMotorState(pca1, 11, 10, 9, rightUi); // BR Wheel
+    
+    Serial.printf("[DRIVE] Left UI:%d, Right UI:%d\n", leftUi, rightUi);
+}
+
+void HardwareController::stop() {
+    // Front Left
+    pca1.setPWM(2, 0, 4096); // FL IN1 LOW
+    pca1.setPWM(1, 0, 4096); // FL IN2 LOW
+    pca1.setPWM(0, 0, 4096); // FL PWM 0
+
+    // Back Left
+    pca1.setPWM(4, 0, 4096); // BL IN3 LOW
+    pca1.setPWM(3, 0, 4096); // BL IN4 LOW
+    pca1.setPWM(5, 0, 4096); // BL PWM 0
+
+    // Front Right
+    pca1.setPWM(8, 0, 4096); // FR IN1 LOW
+    pca1.setPWM(7, 0, 4096); // FR IN2 LOW
+    pca1.setPWM(6, 0, 4096); // FR PWM 0
+
+    // Back Right
+    pca1.setPWM(10, 0, 4096); // BR IN3 LOW
+    pca1.setPWM(9, 0, 4096); // BR IN4 LOW
+    pca1.setPWM(11, 0, 4096); // BR PWM 0
+
+    Serial.println("[DRIVE] INSTANT BRAKE (STOP)");
+}
+
+void HardwareController::setArmMotor(String jointStr, int value) {
+    if (jointStr == "shoulder") { setMotorState(pca2, 6, 7, 8, value); }
+    else if (jointStr == "elbow") { setMotorState(pca2, 3, 4, 5, value); }
+    else if (jointStr == "wrist") { setMotorState(pca2, 0, 1, 2, value); }
+    else if (jointStr == "gripper") { setMotorState(pca2, 9, 15, 11, value); }
+    else if (jointStr == "base") { setMotorState(pca2, 12, 13, 14, value); }
+    else { Serial.printf("[ARM ERR] Unknown Joint: %s\n", jointStr.c_str()); }
 }
 
 float HardwareController::getBatteryVoltage() {
-    int rawValue = analogRead(BATTERY_ADC_PIN);
+    long sum = 0;
+    int valid_count = 0;
+    for (int i = 0; i < 10; i++) {
+        int val = analogRead(BATTERY_ADC_PIN);
+        if (val > 50) { // Filter out erratic 0 drops
+            sum += val;
+            valid_count++;
+        }
+        delayMicroseconds(100);
+    }
+    
+    if (valid_count == 0) return -1.0; // Voltage divider is likely unplugged
+
+    int rawValue = sum / valid_count;
+    
     // ESP32 ADC is 12-bit (0-4095) for 3.3V reference.
     // 3.3V / 4095 = 0.00080586 V per unit
     // Voltage Divider: V_batt = V_pin * ((33k + 10k) / 10k) = V_pin * 4.3
@@ -129,9 +166,14 @@ float HardwareController::getDistance() {
     delayMicroseconds(10);
     digitalWrite(HC_SR04_TRIG_PIN, LOW);
     
-    long duration = pulseIn(HC_SR04_ECHO_PIN, HIGH, 30000); // 30ms timeout
-    if (duration == 0) return -1.0; // timeout or error
+    // Disable interrupts briefly for accurate pulse-in reading without WiFi interference
+    // WARNING: Removing noInterrupts() because blocking Core 0 for 30ms with interrupts off kills WiFi!
+    long duration = pulseIn(HC_SR04_ECHO_PIN, HIGH, 30000); // 30ms strict timeout
+
+    if (duration == 0) return 999.0; // timeout or error
     
     // speed of sound = 343 m/s -> 29.15 us/cm
-    return (duration / 2.0) / 29.1;
+    float distance = (duration / 2.0) / 29.1;
+    if (isnan(distance) || isinf(distance)) return 999.0;
+    return distance;
 }

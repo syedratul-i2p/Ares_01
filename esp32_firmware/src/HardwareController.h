@@ -5,7 +5,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-// I2C MAPPING for PCA9685
+// I2C MAPPING for Unified Bus
 #define I2C_SDA_PIN 1
 #define I2C_SCL_PIN 2
 
@@ -16,11 +16,12 @@
 
 class HardwareController {
 private:
-    Adafruit_PWMServoDriver pwm1; // Wheel Drive (L298N)
-    Adafruit_PWMServoDriver pwm2; // 5-DOF Arm (TB6612FNG)
+    Adafruit_PWMServoDriver pca1 = Adafruit_PWMServoDriver(0x40); // Chassis
+    Adafruit_PWMServoDriver pca2 = Adafruit_PWMServoDriver(0x41); // Arm
 
     // Helper for PCA9685 PWM
     void setPWM(Adafruit_PWMServoDriver &pwm, uint8_t channel, uint16_t on, uint16_t off);
+    void setMotorState(Adafruit_PWMServoDriver &pca, int pwmPin, int in1Pin, int in2Pin, int uiValue);
 
 public:
     HardwareController();
@@ -29,10 +30,11 @@ public:
 
     // Wheel Drive (PCA-1)
     void drive(int speedLeft, int speedRight);
+    void stop();
     
     // Arm Drive (PCA-2)
     // joint: 0-4
-    void setArmMotor(uint8_t joint, int speed);
+    void setArmMotor(String joint, int value);
 
     // Telemetry
     float getBatteryVoltage();

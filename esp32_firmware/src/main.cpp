@@ -1,16 +1,23 @@
+#include "HardwareController.h"
 #include "esp_camera.h"
 #include "esp_log.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WebServer.h>
+#include <WebSocketsServer.h>
 #include <WiFi.h>
-#include "HardwareController.h"
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
 // Function Prototypes
-void executeHardwareCommand(String type, String command, int speed);
+void executeHardwareCommand(String mode, String action, String direction,
+                            int speed, String joint, int angle);
 void handleCommand();
 void stream_handler();
 void handleCapture();
+
+// Global Hardware Fault Flags
+bool camera_fault = false;
 
 // Define Log Tags
 static const char *TAG_SYS = "SYS";
@@ -38,11 +45,38 @@ static const char *TAG_HTTP = "HTTP";
 
 // NETWORK CONFIGURATION
 const char *ap_ssid = "ARES_01_OFFLINE";
-const char *ap_password = "AresAdmin123";
+const char *ap_password = "Admin123";
 const char *sta_ssid = "N3M0_0x7A";
 const char *sta_password = "Ratul_i2p@6072";
 
 WebServer server(80);
+WebSocketsServer webSocket(81);
+unsigned long lastTelemetryTime = 0;
+
+void sendTelemetryData() {
+  float distance_cm = Hardware.getDistance();
+  if (distance_cm < 0)
+    distance_cm = 999.9;
+
+  float battery_voltage = Hardware.getBatteryVoltage();
+  int rssi = WiFi.RSSI();
+  uint32_t free_heap = ESP.getFreeHeap();
+
+  int battery_pct = 0;
+  if (battery_voltage >= 0) {
+    battery_pct = map(battery_voltage * 10, 96, 126, 0, 100);
+    battery_pct = constrain(battery_pct, 0, 100);
+  }
+
+  String telemetryPayload = "{\"obstacle_distance\": " + String((int)distance_cm) +
+                            ", \"rssi\": " + String(rssi) +
+                            ", \"heap\": " + String(free_heap) +
+                            ", \"battery_percentage\": " + String(battery_pct) +
+                            ", \"state\": \"ONLINE\"}";
+
+  Serial.println("[TELEMETRY] " + telemetryPayload);
+  webSocket.broadcastTXT(telemetryPayload);
+}
 
 #define PART_BOUNDARY "123456789000000000000987654321"
 static const char *_STREAM_CONTENT_TYPE =
@@ -51,27 +85,29 @@ static const char *_STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
 static const char *_STREAM_PART =
     "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
-void executeHardwareCommand(String type, String command, int speed) {
-  ESP_LOGI(TAG_SYS, "Executing JSON Command -> Type: %s | Cmd: %s | Speed: %d",
-           type.c_str(), command.c_str(), speed);
+void executeHardwareCommand(String mode, String action, String direction,
+                            int speed, String joint, int angle) {
+  ESP_LOGI(TAG_SYS,
+           "Executing JSON Command -> Mode: %s | Action: %s | Dir: %s | Speed: "
+           "%d | Joint: %s | Angle: %d",
+           mode.c_str(), action.c_str(), direction.c_str(), speed,
+           joint.c_str(), angle);
 
-  if (type == "drive") {
-      if (command == "FORWARD") Hardware.drive(speed, speed);
-      else if (command == "BACKWARD") Hardware.drive(-speed, -speed);
-      else if (command == "LEFT") Hardware.drive(-speed, speed);
-      else if (command == "RIGHT") Hardware.drive(speed, -speed);
-      else Hardware.drive(0, 0);
-  } else if (type == "arm") {
-      int joint = command.toInt();
-      if (command.indexOf("UP") != -1) {
-          Hardware.setArmMotor(joint, speed);
-      } else if (command.indexOf("DOWN") != -1) {
-          Hardware.setArmMotor(joint, -speed);
-      } else if (command.indexOf("STOP") != -1) {
-          Hardware.setArmMotor(joint, 0);
-      } else {
-          Hardware.setArmMotor(joint, speed);
-      }
+  if (action == "drive") {
+    if (direction == "FORWARD")
+      Hardware.drive(speed, speed);
+    else if (direction == "BACKWARD")
+      Hardware.drive(-speed, -speed);
+    else if (direction == "LEFT")
+      Hardware.drive(-speed, speed);
+    else if (direction == "RIGHT")
+      Hardware.drive(speed, -speed);
+    else
+      Hardware.drive(0, 0);
+    return;
+  } else if (action == "arm_control") {
+    Hardware.setArmMotor(joint, angle);
+    return;
   }
 }
 
@@ -82,6 +118,7 @@ void handleCommand() {
     return;
   }
   String body = server.arg("plain");
+  Serial.printf("[HTTP] Raw Payload: %s\n", body.c_str());
   StaticJsonDocument<512> doc;
   DeserializationError error = deserializeJson(doc, body);
   if (error) {
@@ -90,15 +127,39 @@ void handleCommand() {
                 "{\"status\":\"error\", \"message\":\"Invalid JSON\"}");
     return;
   }
-  String type = doc["type"] | "drive";
-  String command = doc["command"] | "STOP";
-  int speed = doc["speed"] | 200;
-  executeHardwareCommand(type, command, speed);
-  server.send(200, "application/json",
-              "{\"status\":\"success\", \"message\":\"Command Executed\"}");
+
+  String mode = doc["mode"] | "manual";
+  String action = doc["action"] | "drive";
+  String direction = doc["direction"] | "STOP";
+  int speed = doc["speed"] | 255;
+  String joint = doc["joint"] | "base";
+  int angle = doc["angle"] | 90;
+
+  if (action == "drive") {
+    executeHardwareCommand(mode, action, direction, speed, joint, angle);
+    doc.clear();
+    server.send(200, "application/json",
+                "{\"status\":\"success\", \"message\":\"Drive Executed\"}");
+    return; // HARD EXIT: Prevent execution of arm logic
+  } else if (action == "arm_control") {
+    executeHardwareCommand(mode, action, direction, speed, joint, angle);
+    doc.clear();
+    server.send(200, "application/json",
+                "{\"status\":\"success\", \"message\":\"Arm Executed\"}");
+    return; // HARD EXIT: Prevent execution of drive logic
+  }
+
+  doc.clear();
+  server.send(400, "application/json",
+              "{\"status\":\"error\", \"message\":\"Unknown Action\"}");
 }
 
 void stream_handler() {
+  if (camera_fault) {
+    server.send(503, "text/plain", "Camera Hardware Fault");
+    return;
+  }
+  
   WiFiClient client = server.client();
   if (!client.connected())
     return;
@@ -118,13 +179,23 @@ void stream_handler() {
 
   unsigned long frame_count = 0; // Initialize frame counter
 
+  uint8_t fail_count = 0;
+
   while (client.connected()) {
+
     fb = esp_camera_fb_get();
     if (!fb) {
-      ESP_LOGE(TAG_CAM, "Capture failed. Retrying...");
-      delay(100);
+      fail_count++;
+      ESP_LOGE(TAG_CAM, "Capture failed. Retrying... (%d/5)", fail_count);
+      if (fail_count >= 5) {
+        ESP_LOGE(TAG_SYS, "Camera Fault! Bypassing camera hardware but keeping HTTP server alive.");
+        camera_fault = true;
+        break;
+      }
+      vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
+    fail_count = 0; // reset on success
     size_t hlen = snprintf(part_buf, 128, _STREAM_PART, fb->len);
     client.write((const uint8_t *)_STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
     client.write((const uint8_t *)part_buf, hlen);
@@ -136,8 +207,7 @@ void stream_handler() {
       ESP_LOGI(TAG_CAM, "Streaming active... Successfully sent %lu frames.",
                frame_count);
     }
-
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(15));
   }
 
   client.stop();
@@ -146,6 +216,11 @@ void stream_handler() {
 }
 
 void handleCapture() {
+  if (camera_fault) {
+    server.send(503, "text/plain", "Camera Hardware Fault");
+    return;
+  }
+
   // DMA Buffer Flush: discard the stale frame
   camera_fb_t *fb_drop = esp_camera_fb_get();
   if (fb_drop) {
@@ -156,6 +231,7 @@ void handleCapture() {
   if (!fb) {
     ESP_LOGE(TAG_CAM, "Camera Capture Failed");
     server.send(500, "text/plain", "Camera Capture Failed");
+    vTaskDelay(pdMS_TO_TICKS(100));
     return;
   }
 
@@ -170,20 +246,52 @@ void handleCapture() {
   esp_camera_fb_return(fb);
   ESP_LOGI(TAG_HTTP, "Single frame captured and sent.");
 }
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
+  switch (type) {
+  case WStype_DISCONNECTED:
+    ESP_LOGI(TAG_SYS, "WebSocket Client [%u] Disconnected", num);
+    break;
+  case WStype_CONNECTED: {
+    IPAddress ip = webSocket.remoteIP(num);
+    ESP_LOGI(TAG_SYS, "WebSocket Client [%u] Connected from %s", num,
+             ip.toString().c_str());
+    // Force immediate live telemetry dispatch (No dummy data)
+    sendTelemetryData();
+  } break;
+  case WStype_TEXT: {
+    StaticJsonDocument<512> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (!error) {
+      String mode = doc["mode"] | "manual";
+      String action = doc["action"] | "drive";
+      String direction = doc["direction"] | "STOP";
+      int speed = doc["speed"] | 255;
+      String joint = doc["joint"] | "base";
+      int angle = doc["angle"] | 90;
 
-void setup() {
-  vTaskDelay(pdMS_TO_TICKS(
-      1000)); // Guard delay to let voltage rails stabilize post-power-on
-  Serial.begin(115200);
+      if (action == "drive" || action == "arm_control") {
+        executeHardwareCommand(mode, action, direction, speed, joint, angle);
+      }
+    } else {
+      ESP_LOGE(TAG_SYS, "WS JSON Parse Error");
+    }
+  } break;
+  case WStype_BIN:
+  case WStype_ERROR:
+  case WStype_FRAGMENT_TEXT_START:
+  case WStype_FRAGMENT_BIN_START:
+  case WStype_FRAGMENT:
+  case WStype_FRAGMENT_FIN:
+  case WStype_PING:
+  case WStype_PONG:
+    break;
+  }
+}
 
-  // Initialize Custom Hardware Controller (I2C, PWM, Sensors)
-  Hardware.begin();
+TaskHandle_t streamTaskHandle;
+TaskHandle_t controlTaskHandle;
 
-  // Set ESP Log Level globally
-  esp_log_level_set("*", ESP_LOG_INFO);
-
-  ESP_LOGI(TAG_SYS, "Booting Advanced ESP32-S3 Firmware...");
-
+void streamTask(void *pvParameters) {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -238,11 +346,21 @@ void setup() {
     esp_restart(); // Force hardware reboot if camera remains unresponsive
   } else {
     ESP_LOGI(TAG_CAM, "Warming up sensor AEC/AGC...");
+    uint8_t warmup_fail_count = 0;
     for (int i = 0; i < 10; i++) {
       camera_fb_t *fb = esp_camera_fb_get();
-      if (fb)
+      if (fb) {
         esp_camera_fb_return(fb);
-      delay(20);
+        warmup_fail_count = 0;
+      } else {
+        warmup_fail_count++;
+        if (warmup_fail_count >= 5) {
+           ESP_LOGE(TAG_SYS, "Camera Fault! Bypassing camera hardware but keeping HTTP server alive.");
+           camera_fault = true;
+           break;
+        }
+      }
+      vTaskDelay(pdMS_TO_TICKS(20));
     }
 
     sensor_t *s = esp_camera_sensor_get();
@@ -257,6 +375,49 @@ void setup() {
       ESP_LOGI(TAG_CAM, "Sensor calibrated successfully.");
     }
   }
+
+  for (;;) {
+    if (camera_fault) {
+      server.handleClient();
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+    server.handleClient();
+    vTaskDelay(pdMS_TO_TICKS(15));
+  }
+}
+
+void controlTask(void *pvParameters) {
+  for (;;) {
+    webSocket.loop();
+    if (millis() - lastTelemetryTime > 100) {
+      sendTelemetryData();
+      lastTelemetryTime = millis();
+    }
+    vTaskDelay(pdMS_TO_TICKS(15));
+  }
+}
+
+void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Disable Brownout detector
+  vTaskDelay(pdMS_TO_TICKS(
+      1000)); // Guard delay to let voltage rails stabilize post-power-on
+  Serial.begin(115200);
+
+  // Initialize Custom Hardware Controller (I2C, PWM, Sensors)
+  Hardware.begin();
+
+  Serial.println("[SCAN] Scanning Wire (I2C0)...");
+  for (byte i = 1; i < 127; i++) {
+    Wire.beginTransmission(i);
+    if (Wire.endTransmission() == 0)
+      Serial.printf("[SCAN] Found device on Wire at 0x%02X\n", i);
+  }
+
+  // Set ESP Log Level globally
+  esp_log_level_set("*", ESP_LOG_INFO);
+
+  ESP_LOGI(TAG_SYS, "Booting Advanced ESP32-S3 Firmware...");
 
   // Clear corrupt NVS WiFi cache to prevent AP/STA password rejection
   WiFi.disconnect(true, true);
@@ -294,11 +455,43 @@ void setup() {
     ESP_LOGI(TAG_WIFI, "Running strictly in Offline AP Mode.");
   }
 
+  server.enableCORS(true);
+
+  server.on("/", HTTP_GET,
+            []() { server.send(200, "text/plain", "ARES-01 ONLINE"); });
+
   server.on("/command", HTTP_POST, handleCommand);
+  server.on("/command", HTTP_OPTIONS, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    server.send(204);
+  });
+
   server.on("/stream", HTTP_GET, stream_handler);
   server.on("/capture", HTTP_GET, handleCapture);
+
+  server.onNotFound([]() {
+    if (server.method() == HTTP_OPTIONS) {
+      server.sendHeader("Access-Control-Allow-Origin", "*");
+      server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+      server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+      server.send(204);
+    } else {
+      server.send(404, "text/plain", "Not Found");
+    }
+  });
+
   server.begin();
-  ESP_LOGI(TAG_SYS, "Monolithic Web Server Started.");
+  webSocket.begin();
+  webSocket.onEvent(webSocketEvent);
+  ESP_LOGI(TAG_SYS, "Monolithic Web Server and WebSocket Server Started.");
+
+  xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 1, &streamTaskHandle, 1);
+  xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 1, &controlTaskHandle, 0);
+  ESP_LOGI(TAG_SYS, "FreeRTOS Dual-Core Architecture initialized!");
 }
 
-void loop() { server.handleClient(); }
+void loop() {
+  vTaskDelete(NULL);
+}

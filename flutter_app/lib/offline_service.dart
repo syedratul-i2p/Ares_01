@@ -41,10 +41,11 @@ class OfflineService {
   }
 
   /// HTTP REST Command Dispatcher
-  Future<void> sendCommand(String type, String command, {int speed = 255}) async {
+  Future<void> sendCommand(String action, String direction, {int speed = 255}) async {
     final payload = {
-      'type': type,
-      'command': command,
+      'mode': 'manual',
+      'action': action,
+      'direction': direction,
       'speed': speed,
     };
     
@@ -55,7 +56,7 @@ class OfflineService {
         body: jsonEncode(payload),
       );
       if (response.statusCode == 200) {
-        debugPrint("[OfflineService] HTTP Command Sent: $command");
+        debugPrint("[OfflineService] HTTP Command Sent: $action - $direction");
       } else {
         debugPrint("[OfflineService] HTTP Command Failed: ${response.statusCode}");
       }
