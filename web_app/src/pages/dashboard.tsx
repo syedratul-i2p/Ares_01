@@ -18,39 +18,37 @@ import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
 
 function useContinuousAction(action: () => void, intervalMs: number = 50) {
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const holdTimer = useRef<NodeJS.Timeout | null>(null);
+  const holdInterval = useRef<NodeJS.Timeout | null>(null);
 
-  const stop = useCallback(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    intervalRef.current = null;
-    timeoutRef.current = null;
+  const stopArmMove = useCallback(() => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    if (holdInterval.current) clearInterval(holdInterval.current);
+    holdTimer.current = null;
+    holdInterval.current = null;
   }, []);
 
-  const start = useCallback((e: React.SyntheticEvent) => {
-    if (e.cancelable) {
-      e.preventDefault();
-    }
-    stop();
+  const startArmMove = useCallback((e: React.SyntheticEvent) => {
+    e.preventDefault();
+    stopArmMove();
     action();
     
-    timeoutRef.current = setTimeout(() => {
-      intervalRef.current = setInterval(() => {
+    holdTimer.current = setTimeout(() => {
+      holdInterval.current = setInterval(() => {
         action();
       }, intervalMs);
     }, 250);
-  }, [action, intervalMs, stop]);
+  }, [action, intervalMs, stopArmMove]);
 
   useEffect(() => {
-    return stop;
-  }, [stop]);
+    return stopArmMove;
+  }, [stopArmMove]);
 
   return {
-    onPointerDown: start,
-    onPointerUp: stop,
-    onPointerLeave: stop,
-    onPointerCancel: stop,
+    onPointerDown: startArmMove,
+    onPointerUp: stopArmMove,
+    onPointerLeave: stopArmMove,
+    onPointerCancel: stopArmMove,
     onContextMenu: (e: React.SyntheticEvent) => e.preventDefault(),
   };
 }
@@ -664,11 +662,18 @@ const CameraView = React.memo(function CameraView({
           key={streamSrc}
           src={streamSrc} 
           alt="ARES-01 live feed"
+          crossOrigin="anonymous"
           className="w-full h-full object-cover rounded-xl transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
           onLoadStart={() => console.log(`[ARES-01] Camera stream loading from ${streamSrc}`)}
-          onError={() => {
-            setStreamError(true);
-            console.error(`[ARES-01] Camera stream error at ${streamSrc}. Connection refused or timed out.`);
+          onError={(e) => {
+            const currentSrc = e.currentTarget.src;
+            if (currentSrc.includes(":81/")) {
+              console.log(`[ARES-01] Port 81 failed, falling back to port 80...`);
+              e.currentTarget.src = currentSrc.replace(":81/", "/");
+            } else {
+              setStreamError(true);
+              console.error(`[ARES-01] Camera stream error at ${currentSrc}. Connection refused or timed out.`);
+            }
           }}
           data-testid="camera-feed"
         />
@@ -2334,7 +2339,7 @@ RULES:
         if (ip) {
           setRoverIp(ip);
           setStreamError(false);
-          setStreamSrc(`http://${ip}/stream?cb=${Date.now()}`);
+          setStreamSrc(`http://${ip}:81/stream?cb=${Date.now()}`);
         }
       })
       .catch((err) => {

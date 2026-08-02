@@ -5,10 +5,10 @@
 #include "soc/soc.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFi.h>
-#include <Preferences.h>
 
 // Function Prototypes
 void executeHardwareCommand(String mode, String action, String direction,
@@ -47,8 +47,8 @@ static const char *TAG_HTTP = "HTTP";
 // NETWORK CONFIGURATION
 const char *ap_ssid = "ARES_01_OFFLINE";
 const char *ap_password = "Admin123";
-const char *sta_ssid = "FFFF";
-const char *sta_password = "FFF";
+const char *sta_ssid = "N3M0_0x70";
+const char *sta_password = "Ratul_i2p@07";
 
 WebServer server(80);
 WebSocketsServer webSocket(81);
@@ -70,10 +70,8 @@ String getTelemetryJSON() {
     battery_pct = constrain(battery_pct, 0, 100);
   }
 
-  return "{\"obstacle_distance\": " + String((int)distance_cm) +
-         ", \"rssi\": " + String(rssi) + ", \"heap\": " + String(free_heap) +
-         ", \"battery_percentage\": " + String(battery_pct) +
-         ", \"state\": \"ONLINE\"}";
+  return "{\"distance\": " + String((int)distance_cm) +
+         ", \"battery\": " + String(battery_pct) + "}";
 }
 
 void sendTelemetryData() {
@@ -175,7 +173,9 @@ void stream_handler() {
   client.print("HTTP/1.1 200 OK\r\n");
   client.print("Access-Control-Allow-Origin: *\r\n");
   client.print("Access-Control-Allow-Methods: GET, OPTIONS\r\n");
-  client.print("Cache-Control: no-cache, private, no-store, must-revalidate\r\n");
+  client.print("Access-Control-Allow-Private-Network: true\r\n");
+  client.print(
+      "Cache-Control: no-cache, private, no-store, must-revalidate\r\n");
   client.print("Pragma: no-cache\r\n");
   client.print("Content-Type: ");
   client.print(_STREAM_CONTENT_TYPE);
@@ -404,7 +404,7 @@ void controlTask(void *pvParameters) {
       sendTelemetryData();
       lastTelemetryTime = millis();
     }
-    
+
     // Mode B: Non-blocking Serial Listener for Live WiFi Config Injection
     if (Serial.available()) {
       String line = Serial.readStringUntil('\n');
@@ -417,7 +417,8 @@ void controlTask(void *pvParameters) {
           String new_pass = line.substring(secondColon + 1);
           preferences.putString("ssid", new_ssid);
           preferences.putString("pass", new_pass);
-          Serial.println("[SYSTEM] New WiFi Config Received via Serial! Reconnecting...");
+          Serial.println(
+              "[SYSTEM] New WiFi Config Received via Serial! Reconnecting...");
           WiFi.disconnect(true);
           WiFi.begin(new_ssid.c_str(), new_pass.c_str());
         }
