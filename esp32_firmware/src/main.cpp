@@ -9,6 +9,7 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 
 // Function Prototypes
 void executeHardwareCommand(String mode, String action, String direction,
@@ -53,32 +54,15 @@ static const char *TAG_HTTP = "HTTP";
 // NETWORK CONFIGURATION
 const char *ap_ssid = "ARES_01_OFFLINE";
 const char *ap_password = "Admin123";
-const char *sta_ssid = "N3M0_0x7A";
-const char *sta_password = "Ratul_i2p@6072";
+const char *sta_ssid = "N3M0_0x70";
+const char *sta_password = "Ratul_i2p@07";
 
 WebServer server(80);
 WebSocketsServer webSocket(81);
 Preferences preferences;
 unsigned long lastTelemetryTime = 0;
 
-String getTelemetryJSON() {
-  float distance_cm = Hardware.getDistance();
-  if (distance_cm < 0)
-    distance_cm = 999.9;
-
-  float battery_voltage = Hardware.getBatteryVoltage();
-  int rssi = WiFi.RSSI();
-  uint32_t free_heap = ESP.getFreeHeap();
-
-  int battery_pct = 0;
-  if (battery_voltage >= 0) {
-    battery_pct = map(battery_voltage * 10, 96, 126, 0, 100);
-    battery_pct = constrain(battery_pct, 0, 100);
-  }
-
-  return "{\"distance\": " + String((int)distance_cm) +
-         ", \"battery\": " + String(battery_pct) + "}";
-}
+String getTelemetryJSON() { return "{\"ping\": true}"; }
 
 void sendTelemetryData() {
   String telemetryPayload = getTelemetryJSON();
@@ -149,21 +133,23 @@ void handleCommand() {
   joint.toLowerCase();
 
   if (mode == "arm") {
-      if (action == "start") {
-          arm_moving = true;
-          arm_joint = doc["joint"] | "base";
-          arm_dir = doc["direction"] | "up";
-          arm_joint.toLowerCase();
-          arm_dir.toLowerCase();
-      } else if (action == "stop") {
-          arm_moving = false;
-      } else if (action == "arm_control" && angle != -1) {
-          // Fallback for UI sliders / absolute position
-          Hardware.setArmMotor(joint, "", angle);
-      }
-      doc.clear();
-      server.send(200, "application/json", "{\"status\":\"success\", \"message\":\"Arm Command Received\"}");
-      return;
+    if (action == "start") {
+      arm_moving = true;
+      arm_joint = doc["joint"] | "base";
+      arm_dir = doc["direction"] | "up";
+      arm_joint.toLowerCase();
+      arm_dir.toLowerCase();
+    } else if (action == "stop") {
+      arm_moving = false;
+    } else if (action == "arm_control" && angle != -1) {
+      // Fallback for UI sliders / absolute position
+      Hardware.setArmMotor(joint, "", angle);
+    }
+    doc.clear();
+    server.send(
+        200, "application/json",
+        "{\"status\":\"success\", \"message\":\"Arm Command Received\"}");
+    return;
   }
 
   if (action == "drive") {
@@ -171,7 +157,7 @@ void handleCommand() {
     doc.clear();
     server.send(200, "application/json",
                 "{\"status\":\"success\", \"message\":\"Drive Executed\"}");
-    return; 
+    return;
   }
 
   doc.clear();
@@ -179,15 +165,26 @@ void handleCommand() {
               "{\"status\":\"error\", \"message\":\"Unknown Action\"}");
 }
 
+volatile bool stream_active = false;
+
 void stream_handler() {
   if (camera_fault) {
     server.send(503, "text/plain", "Camera Hardware Fault");
     return;
   }
 
-  WiFiClient client = server.client();
-  if (!client.connected())
+  if (stream_active) {
+    ESP_LOGW(TAG_HTTP, "Stream already active. Rejecting new client with 429.");
+    server.send(429, "text/plain", "Too Many Requests");
     return;
+  }
+  stream_active = true;
+
+  WiFiClient client = server.client();
+  if (!client.connected()) {
+    stream_active = false;
+    return;
+  }
 
   // Disable Nagle's algorithm for immediate transmission of motion frames
   client.setNoDelay(true);
@@ -216,34 +213,41 @@ void stream_handler() {
     fb = esp_camera_fb_get();
     if (!fb) {
       fail_count++;
-      ESP_LOGE(TAG_CAM, "Capture failed. Retrying... (%d/5)", fail_count);
-      if (fail_count >= 5) {
-        ESP_LOGE(TAG_SYS, "Camera Fault! Bypassing camera hardware but keeping "
-                          "HTTP server alive.");
-        camera_fault = true;
+      ESP_LOGE(TAG_CAM, "Capture failed. Retrying... (%d/3)", fail_count);
+      vTaskDelay(pdMS_TO_TICKS(50));
+      if (fail_count >= 3) {
+        ESP_LOGE(TAG_SYS, "Stream aborted due to consecutive failures. Freeing "
+                          "server thread.");
         break;
       }
-      vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
     fail_count = 0; // reset on success
     size_t hlen = snprintf(part_buf, 128, _STREAM_PART, fb->len);
-    client.write((const uint8_t *)_STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
-    client.write((const uint8_t *)part_buf, hlen);
-    client.write(fb->buf, fb->len);
+    size_t w1 = client.write((const uint8_t *)_STREAM_BOUNDARY,
+                             strlen(_STREAM_BOUNDARY));
+    size_t w2 = client.write((const uint8_t *)part_buf, hlen);
+    size_t w3 = client.write(fb->buf, fb->len);
     esp_camera_fb_return(fb);
+
+    if (w1 == 0 || w2 == 0 || w3 == 0) {
+      ESP_LOGW(TAG_HTTP, "Stream write failed. Disconnecting client.");
+      break;
+    }
 
     frame_count++;
     if (frame_count % 100 == 0) {
       ESP_LOGI(TAG_CAM, "Streaming active... Successfully sent %lu frames.",
                frame_count);
     }
-    vTaskDelay(pdMS_TO_TICKS(15));
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 
   client.stop();
+  stream_active = false;
   ESP_LOGI(TAG_HTTP, "MJPEG Stream client disconnected. Total frames sent: %lu",
            frame_count);
+  vTaskDelay(pdMS_TO_TICKS(5));
 }
 
 void handleCapture() {
@@ -307,17 +311,17 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload,
       joint.toLowerCase();
 
       if (mode == "arm") {
-          if (action == "start") {
-              arm_moving = true;
-              arm_joint = doc["joint"] | "base";
-              arm_dir = doc["direction"] | "up";
-              arm_joint.toLowerCase();
-              arm_dir.toLowerCase();
-          } else if (action == "stop") {
-              arm_moving = false;
-          } else if (action == "arm_control" && angle != -1) {
-              Hardware.setArmMotor(joint, "", angle);
-          }
+        if (action == "start") {
+          arm_moving = true;
+          arm_joint = doc["joint"] | "base";
+          arm_dir = doc["direction"] | "up";
+          arm_joint.toLowerCase();
+          arm_dir.toLowerCase();
+        } else if (action == "stop") {
+          arm_moving = false;
+        } else if (action == "arm_control" && angle != -1) {
+          Hardware.setArmMotor(joint, "", angle);
+        }
       } else if (action == "drive" || action == "arm_control") {
         executeHardwareCommand(mode, action, direction, speed, joint, angle);
       }
@@ -365,8 +369,8 @@ void streamTask(void *pvParameters) {
 
   if (psramFound()) {
     ESP_LOGI(TAG_CAM, "PSRAM Found. Initializing stable buffers.");
-    config.frame_size = FRAMESIZE_UXGA;
-    config.jpeg_quality = 14;
+    config.frame_size = FRAMESIZE_VGA;
+    config.jpeg_quality = 12;
     config.fb_count = 2;
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_LATEST;
@@ -395,22 +399,17 @@ void streamTask(void *pvParameters) {
     esp_restart(); // Force hardware reboot if camera remains unresponsive
   } else {
     ESP_LOGI(TAG_CAM, "Warming up sensor AEC/AGC...");
-    uint8_t warmup_fail_count = 0;
-    for (int i = 0; i < 10; i++) {
+    int warmup_limit = 0;
+    while (warmup_limit < 5) {
       camera_fb_t *fb = esp_camera_fb_get();
-      if (fb) {
-        esp_camera_fb_return(fb);
-        warmup_fail_count = 0;
-      } else {
-        warmup_fail_count++;
-        if (warmup_fail_count >= 5) {
-          ESP_LOGE(TAG_SYS, "Camera Fault! Bypassing camera hardware but "
-                            "keeping HTTP server alive.");
-          camera_fault = true;
-          break;
-        }
+      if (!fb) {
+        Serial.printf("[CAM] Warmup frame dropped (%d)\n", warmup_limit);
+        warmup_limit++;
+        vTaskDelay(pdMS_TO_TICKS(100)); // Crucial delay to free up CPU
+        continue;
       }
-      vTaskDelay(pdMS_TO_TICKS(20));
+      esp_camera_fb_return(fb);
+      break;
     }
 
     sensor_t *s = esp_camera_sensor_get();
@@ -440,7 +439,7 @@ void streamTask(void *pvParameters) {
 void controlTask(void *pvParameters) {
   for (;;) {
     webSocket.loop();
-    if (millis() - lastTelemetryTime > 100) {
+    if (millis() - lastTelemetryTime > 500) {
       sendTelemetryData();
       lastTelemetryTime = millis();
     }
@@ -450,21 +449,23 @@ void controlTask(void *pvParameters) {
     static String last_arm_dir = "";
 
     if (arm_moving) {
-        if (!was_arm_moving || arm_joint != last_arm_joint || arm_dir != last_arm_dir) {
-            Serial.printf("[ARM EXEC] Driving %s %s\n", arm_joint.c_str(), arm_dir.c_str());
-            Hardware.driveArmMotor(arm_joint, arm_dir, 4095);
-            was_arm_moving = true;
-            last_arm_joint = arm_joint;
-            last_arm_dir = arm_dir;
-        }
+      if (!was_arm_moving || arm_joint != last_arm_joint ||
+          arm_dir != last_arm_dir) {
+        Serial.printf("[ARM EXEC] Driving %s %s\n", arm_joint.c_str(),
+                      arm_dir.c_str());
+        Hardware.driveArmMotor(arm_joint, arm_dir, 4095);
+        was_arm_moving = true;
+        last_arm_joint = arm_joint;
+        last_arm_dir = arm_dir;
+      }
     } else {
-        if (was_arm_moving) {
-            Serial.println("[ARM EXEC] Stopping all motors");
-            Hardware.stopArm();
-            was_arm_moving = false;
-            last_arm_joint = "";
-            last_arm_dir = "";
-        }
+      if (was_arm_moving) {
+        Serial.println("[ARM EXEC] Stopping all motors");
+        Hardware.stopArm();
+        was_arm_moving = false;
+        last_arm_joint = "";
+        last_arm_dir = "";
+      }
     }
 
     // Mode B: Non-blocking Serial Listener for Live WiFi Config Injection
@@ -518,6 +519,7 @@ void setup() {
   vTaskDelay(pdMS_TO_TICKS(100));
 
   WiFi.setSleep(false);
+  esp_wifi_set_ps(WIFI_PS_NONE);
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(ap_ssid, ap_password, 6, 0, 4);
   ESP_LOGI(TAG_WIFI, "AP Live on Channel 6. IP: %s",
@@ -553,8 +555,10 @@ void setup() {
 
   server.enableCORS(true);
 
-  server.on("/", HTTP_GET,
-            []() { server.send(200, "text/plain", "ARES-01 ONLINE"); });
+  server.on("/", HTTP_GET, []() {
+    server.send(200, "text/plain", "ARES-01 Rover API");
+    vTaskDelay(pdMS_TO_TICKS(5));
+  });
 
   server.on("/command", HTTP_POST, handleCommand);
   server.on("/command", HTTP_OPTIONS, []() {
@@ -571,7 +575,7 @@ void setup() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
     server.sendHeader("Access-Control-Allow-Private-Network", "true");
     server.sendHeader("Cache-Control", "no-cache");
-    server.send(200, "application/json", "{\"battery\":100, \"distance\":10, \"status\":\"ok\"}");
+    server.send(200, "application/json", getTelemetryJSON());
   });
 
   server.onNotFound([]() {
@@ -587,6 +591,7 @@ void setup() {
 
   server.begin();
   webSocket.begin();
+  webSocket.enableHeartbeat(15000, 3000, 2);
   webSocket.onEvent(webSocketEvent);
   ESP_LOGI(TAG_SYS, "Monolithic Web Server and WebSocket Server Started.");
 

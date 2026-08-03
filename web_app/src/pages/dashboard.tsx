@@ -312,11 +312,8 @@ interface SettingsPanelProps {
   setRoverIp: (val: string) => void;
   streamSrc: string | null;
   streamError: boolean;
-  handleConnectCamera: () => void;
-  handleDisconnectCamera: () => void;
-  handleConnectCommand: () => void;
-  commandUrl: string;
-  setCommandUrl: (val: string) => void;
+  handleConnect: () => void;
+  handleDisconnect: () => void;
   ping: number | null;
   rebooting: boolean;
   handleReboot: () => void;
@@ -340,11 +337,8 @@ const SettingsPanel = React.memo(function SettingsPanel({
   setRoverIp,
   streamSrc,
   streamError,
-  handleConnectCamera,
-  handleDisconnectCamera,
-  handleConnectCommand,
-  commandUrl,
-  setCommandUrl,
+  handleConnect,
+  handleDisconnect,
   ping,
   rebooting,
   handleReboot,
@@ -489,10 +483,10 @@ const SettingsPanel = React.memo(function SettingsPanel({
               <div className="space-y-2.5 pt-1">
                 <span className="text-[10px] font-bold text-[#A0A0A0] uppercase tracking-wider">Hardware Connections</span>
                 
-                {/* ESP32-CAM Stream Host */}
+                {/* Unified Rover Connection */}
                 <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-transparent hover:bg-slate-50 dark:hover:bg-[rgba(255,255,255,0.02)] border border-transparent hover:border-slate-200 dark:hover:border-[#333] transition-colors">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-slate-900 dark:text-[#E0E0E0]">ESP32-CAM Stream Host</span>
+                    <span className="text-[11px] font-semibold text-slate-900 dark:text-[#E0E0E0]">Rover IP Address</span>
                     {streamSrc && !streamError && (
                       <span className="w-1 h-1 rounded-full bg-slate-400" />
                     )}
@@ -501,51 +495,27 @@ const SettingsPanel = React.memo(function SettingsPanel({
                     <input
                       type="text"
                       className="h-6 text-[10px] bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
-                      placeholder="192.168.0.200"
+                      placeholder="Enter Rover IP (e.g., 192.168.1.5)"
                       value={roverIp}
                       onChange={e => setRoverIp(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && handleConnectCamera()}
+                      onKeyDown={e => e.key === "Enter" && handleConnect()}
                     />
                     {streamSrc ? (
                       <button
-                        onClick={handleDisconnectCamera}
+                        onClick={handleDisconnect}
                         className="w-full sm:w-auto px-2 py-1.5 sm:py-0.5 text-[10px] sm:text-[9px] font-bold rounded border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"
                       >
                         Disconnect
                       </button>
                     ) : (
                       <button
-                        onClick={handleConnectCamera}
+                        onClick={handleConnect}
                         disabled={!roverIp.trim()}
                         className="w-full sm:w-auto px-2.5 py-1.5 sm:py-0.5 text-[10px] sm:text-[9px] font-bold rounded bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground transition-all cursor-pointer border-0"
                       >
                         Connect
                       </button>
                     )}
-                  </div>
-                </div>
-
-                {/* HTTP Command Endpoint */}
-                <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-transparent hover:bg-slate-50 dark:hover:bg-[rgba(255,255,255,0.02)] border border-transparent hover:border-slate-200 dark:hover:border-[#333] transition-colors">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-slate-900 dark:text-[#E0E0E0]">Rover Command Endpoint (HTTP)</span>
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-2 sm:gap-1.5">
-                    <input
-                      type="text"
-                      className="h-6 text-[10px] bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
-                      placeholder="172.30.43.196"
-                      value={commandUrl}
-                      onChange={e => setCommandUrl(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && handleConnectCommand()}
-                    />
-                    <button
-                      onClick={handleConnectCommand}
-                      disabled={!commandUrl.trim()}
-                      className="w-full sm:w-auto px-2.5 py-1.5 sm:py-0.5 text-[10px] sm:text-[9px] font-bold rounded bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground transition-all cursor-pointer border-0"
-                    >
-                      Connect
-                    </button>
                   </div>
                 </div>
               </div>
@@ -586,59 +556,19 @@ interface CameraViewProps {
   streamSrc: string | null;
   streamError: boolean;
   rssi: number | undefined;
-  solar: number | undefined;
-  distance: number | undefined;
   setStreamError: React.Dispatch<React.SetStateAction<boolean>>;
+  setStreamSrc: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 const CameraView = React.memo(function CameraView({
   streamSrc,
   streamError,
   rssi,
-  solar,
-  distance,
-  setStreamError
+  setStreamError,
+  setStreamSrc
 }: CameraViewProps) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!streamSrc) return;
-    let isActive = true;
-    let timeoutId: any;
-
-    const fetchFrame = async () => {
-      try {
-        const captureUrl = streamSrc.replace('/stream', '/capture');
-        const res = await fetch(captureUrl, { cache: 'no-store' });
-        if (!res.ok) throw new Error("Network response was not ok");
-        const blob = await res.blob();
-        if (!isActive) return;
-        const objectUrl = URL.createObjectURL(blob);
-        setBlobUrl(prev => {
-          if (prev) URL.revokeObjectURL(prev);
-          return objectUrl;
-        });
-        setStreamError(false);
-      } catch (e) {
-        if (!isActive) return;
-        setStreamError(true);
-      }
-      if (isActive) {
-        timeoutId = setTimeout(fetchFrame, 100);
-      }
-    };
-
-    fetchFrame();
-
-    return () => {
-      isActive = false;
-      clearTimeout(timeoutId);
-      setBlobUrl(prev => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
-    };
-  }, [streamSrc, setStreamError]);
+  // The fetchFrame useEffect and blobUrl have been removed to prevent 
+  // aggressive double-streaming which exhausts ESP32 TCP sockets.
 
   return (
     <div className="relative w-full h-full bg-[#050505] overflow-hidden">
@@ -651,13 +581,30 @@ const CameraView = React.memo(function CameraView({
           className="w-full h-full object-cover rounded-xl transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
           onLoadStart={() => console.log(`[ARES-01] Camera stream loading from ${streamSrc}`)}
           onError={(e) => {
-            const currentSrc = e.currentTarget.src;
+            const target = e.currentTarget;
+            const currentSrc = target.src;
+            const now = Date.now();
+            
+            // Check dataset for last retry timestamp
+            const lastRetry = parseInt(target.dataset.lastRetry || "0", 10);
+            
+            // Enforce 2000ms cooldown
+            if (now - lastRetry < 2000) {
+              console.warn(`[ARES-01] Stream error throttle active. Suppressing reload.`);
+              return;
+            }
+            target.dataset.lastRetry = now.toString();
+            
             if (currentSrc.includes(":81/")) {
               console.log(`[ARES-01] Port 81 failed, falling back to port 80...`);
-              e.currentTarget.src = currentSrc.replace(":81/", "/");
+              target.src = currentSrc.replace(":81/", "/");
             } else {
-              setStreamError(true);
-              console.error(`[ARES-01] Camera stream error at ${currentSrc}. Connection refused or timed out.`);
+              console.error(`[ARES-01] Camera stream error at ${currentSrc}. Connection refused or timed out. Retrying in 2s...`);
+              setTimeout(() => {
+                if (streamSrc) {
+                  target.src = `${streamSrc.split('?')[0]}?cb=${Date.now()}`;
+                }
+              }, 2000);
             }
           }}
           data-testid="camera-feed"
@@ -678,9 +625,21 @@ const CameraView = React.memo(function CameraView({
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 z-20">
             {streamError ? (
               <>
-                <AlertTriangle className="w-8 h-8 text-red-400/60" />
-                <span className="text-red-400/60 font-mono text-sm">STREAM UNREACHABLE</span>
-                <span className="text-white/20 font-mono text-xs">{streamSrc}</span>
+                <AlertTriangle className="w-10 h-10 text-red-500 animate-pulse mb-1" />
+                <span className="text-red-400 font-mono text-base font-bold tracking-widest">⚠️ CAMERA SENSOR FAULT</span>
+                <span className="text-white/70 font-mono text-sm mt-1 text-center max-w-xs">Physical connection lost. Check ribbon cable & power supply.</span>
+                <button 
+                  onClick={() => {
+                    setStreamError(false);
+                    if (streamSrc) {
+                      const base = streamSrc.split('?')[0];
+                      setStreamSrc(`${base}?cb=${Date.now()}`);
+                    }
+                  }}
+                  className="mt-5 px-5 py-2 bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 rounded-lg text-red-100 font-mono text-sm transition-all duration-300 cursor-pointer shadow-[0_0_15px_rgba(239,68,68,0.3)] hover:shadow-[0_0_25px_rgba(239,68,68,0.5)] active:scale-95"
+                >
+                  RETRY CAMERA
+                </button>
               </>
             ) : (
               <>
@@ -1077,12 +1036,12 @@ export default function Dashboard() {
   // ── Network / Connection State
   const [roverConnectionStatus, setRoverConnectionStatus] = useState<RoverConnectionStatus>("disconnected");
   const [ping, setPing] = useState<number | null>(null);
-  const [commandUrl, setCommandUrl] = useState("172.30.43.196");
+  const [commandUrl, setCommandUrl] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [roverMode, setRoverMode] = useState<"MANUAL" | "AUTONOMOUS">("MANUAL");
 
   // ── Camera Stream State (Moved up for hook dependency array)
-  const [roverIp, setRoverIp] = useState("192.168.0.200");
+  const [roverIp, setRoverIp] = useState("");
   const [streamSrc, setStreamSrc] = useState<string | null>(null);
   const [streamError, setStreamError] = useState(false);
 
@@ -1093,14 +1052,10 @@ export default function Dashboard() {
 
   // ── Phase 6.1 Telemetry & Task Queue State
   interface SystemTelemetry {
-    battery_percentage: number | null;
-    obstacle_distance: number;
     rssi: number;
     heap: number;
   }
   const [telemetry, setTelemetry] = useState<SystemTelemetry>({ 
-    battery_percentage: null, 
-    obstacle_distance: 0,
     rssi: 0,
     heap: 0
   });
@@ -1139,8 +1094,6 @@ export default function Dashboard() {
       const updateTelemetry = (data: any) => {
         setTelemetry(prev => ({
           ...prev,
-          obstacle_distance: data.obstacle_distance ?? data.distance ?? prev.obstacle_distance,
-          battery_percentage: data.battery_percentage ?? data.battery ?? prev.battery_percentage,
           rssi: data.rssi ?? prev.rssi,
           heap: data.heap ?? prev.heap
         }));
@@ -1152,10 +1105,13 @@ export default function Dashboard() {
       globalWs = telemetryWs;
       
       telemetryWs.onmessage = (e) => {
-        setRoverOnline(true);
-        lastPacketTime = Date.now();
         try {
-          updateTelemetry(JSON.parse(e.data));
+          const data = JSON.parse(e.data);
+          console.log("[WS TELEMETRY]", data);
+          if (data.ping === true || data.rssi !== undefined) {
+            setRoverOnline(true);
+            lastPacketTime = Date.now();
+          }
         } catch (err) {}
       };
 
@@ -1172,20 +1128,13 @@ export default function Dashboard() {
             } catch (err) {}
           }
         } catch (err) {}
-        
-        if (Date.now() - lastPacketTime > 3000) {
+        if (Date.now() - lastPacketTime > 8000) {
           setRoverOnline(false);
         }
       }, 1000);
       const resetTelemetry = () => {
         setRoverOnline(false);
-        setTelemetry(prev => ({
-          ...prev,
-          battery_percentage: null,
-          obstacle_distance: 0,
-          rssi: 0,
-          heap: 0
-        }));
+        // Do not wipe out telemetry so the UI keeps displaying the last known values
       };
 
       telemetryWs.onclose = resetTelemetry;
@@ -1370,7 +1319,7 @@ export default function Dashboard() {
   }>({});
 
   const distance  = liveTelemetry.obstacle_distance;
-  const solar     = liveTelemetry.battery_percentage;
+
   const motorTemp = liveTelemetry.motor_temp;
   const rssi      = liveTelemetry.rssi;
 
@@ -1431,9 +1380,9 @@ export default function Dashboard() {
     syncMissionStatus({
       mode: controlMode,
       ping: ping,
-      battery: liveTelemetry.solar || null,
+      battery: null,
     });
-  }, [controlMode, ping, liveTelemetry.solar]);
+  }, [controlMode, ping]);
 
   // ── D-Pad
   const [activeDirection, setActiveDirection] = useState<Direction | null>(null);
@@ -2340,69 +2289,45 @@ RULES:
 
   // ── Camera Stream Handlers
 
-  const handleConnectCamera = useCallback(() => {
-    if (!roverIp.trim()) return;
+  const handleConnect = useCallback(() => {
+    let rawIp = roverIp.trim();
+    if (!rawIp) return;
     
-    let url = roverIp.trim();
-    let finalUrl = "";
+    // Strip protocols, slashes, and spaces
+    let cleanIp = rawIp.replace(/^https?:\/\//i, '').replace(/^ws:\/\//i, '').split('/')[0].trim();
     
-    if (url.startsWith("http://") || url.startsWith("https://")) {
-      // Rule 1: Starts with protocol, use exactly as inputted
-      finalUrl = url;
-    } else if (url.includes("/")) {
-      // Rule 2: Contains a slash (custom path), prepend http:// but keep path intact
-      finalUrl = `http://${url}`;
-    } else {
-      // Default: Plain host/IP, prepend http:// and append /stream (port 80 default)
-      finalUrl = `http://${url}/stream`;
-    }
+    const newCommandUrl = `http://${cleanIp}`;
+    const newStreamUrl = `http://${cleanIp}/stream?cb=${Date.now()}`;
     
-    // Cache bust to prevent shared image cache pool accumulation
-    const separator = finalUrl.includes("?") ? "&" : "?";
-    finalUrl = `${finalUrl}${separator}cb=${Date.now()}`;
+    setCommandUrl(newCommandUrl);
+    setRoverIp(cleanIp);
     
-    console.log(`${LOG} Connecting camera stream: ${finalUrl}`);
-    setStreamError(false);
-    setStreamSrc(finalUrl);
-  }, [roverIp]);
-
-  const handleConnectCommand = useCallback(() => {
-    if (!commandUrl.trim()) return;
-    let url = commandUrl.trim();
-    if (!url.startsWith("http://") && !url.startsWith("https://")) {
-      url = `http://${url}`;
-    }
-    setCommandUrl(url);
-
-    const match = url.match(/https?:\/\/([^:/]+)/);
-    const ip = match ? match[1] : "";
-    
-    // Non-blocking ping using fetch detached from UI thread
+    // Ping to verify connection
     const startTime = performance.now();
-    fetch(url, { method: "GET", mode: "no-cors", cache: "no-store" })
+    fetch(newCommandUrl, { method: "GET", mode: "no-cors", cache: "no-store" })
       .then(() => {
         const latency = Math.round(performance.now() - startTime);
         setPing(latency);
         setRoverOnline(true);
-        toast.success("Connected to Command Endpoint");
-
-        if (ip) {
-          setRoverIp(ip);
-          setStreamError(false);
-          setStreamSrc(`http://${ip}:81/stream?cb=${Date.now()}`);
-        }
+        toast.success("Connected to Rover");
+        
+        setStreamError(false);
+        setStreamSrc(newStreamUrl);
       })
       .catch((err) => {
         setRoverOnline(false);
         setPing(null);
-        toast.error("Failed to connect to Command Endpoint");
+        toast.error("Failed to connect to Rover");
       });
-  }, [commandUrl]);
+  }, [roverIp]);
 
-  const handleDisconnectCamera = useCallback(() => {
+  const handleDisconnect = useCallback(() => {
     setStreamSrc(null);
     setStreamError(false);
-    console.log(`${LOG} Camera stream disconnected`);
+    setCommandUrl("");
+    setRoverOnline(false);
+    setPing(null);
+    console.log(`${LOG} Disconnected from Rover`);
   }, []);
 
   // ── Settings Panel & WS Cleanup// ─── Render ────────────────────────────────────────────────────────────────
@@ -2432,11 +2357,8 @@ RULES:
         setRoverIp={setRoverIp}
         streamSrc={streamSrc}
         streamError={streamError}
-        handleConnectCamera={handleConnectCamera}
-        handleDisconnectCamera={handleDisconnectCamera}
-        handleConnectCommand={handleConnectCommand}
-        commandUrl={commandUrl}
-        setCommandUrl={setCommandUrl}
+        handleConnect={handleConnect}
+        handleDisconnect={handleDisconnect}
         ping={ping}
         rebooting={rebooting}
         handleReboot={handleReboot}
@@ -2666,16 +2588,6 @@ RULES:
                 <span className="text-white font-mono text-xs font-bold tracking-wider">{rssi} dBm</span>
               </div>
             )}
-            <div className={`flex items-center gap-1.5 bg-black/40 backdrop-blur-xl border border-white/20 rounded-lg shadow-[0_4px_30px_rgba(0,0,0,0.5)] px-3 py-1.5 transition-all duration-500 ${telemetry.battery_percentage !== null && telemetry.battery_percentage < 20 ? "shadow-[0_0_15px_rgba(239,68,68,0.4)] border-red-500/50 animate-pulse" : ""}`}>
-                <Zap className={`w-3.5 h-3.5 ${telemetry.battery_percentage !== null && telemetry.battery_percentage < 20 ? 'text-red-400' : 'text-green-400'}`} />
-                <span className="text-white font-mono text-xs font-bold tracking-wider">{telemetry.battery_percentage !== null ? telemetry.battery_percentage.toFixed(0) + '%' : '--%'}</span>
-            </div>
-            {telemetry.obstacle_distance !== undefined && (
-              <div className="flex items-center gap-1.5 bg-black/40 backdrop-blur-xl border border-white/20 rounded-lg shadow-[0_4px_30px_rgba(0,0,0,0.5)] px-3 py-1.5">
-                <Ruler className="w-3.5 h-3.5 text-blue-400" />
-                <span className="text-white font-mono text-xs font-bold tracking-wider">{telemetry.obstacle_distance} cm</span>
-              </div>
-            )}
           </div>
         </div>
         <div className="flex-[4] w-[98%] mx-auto relative flex items-center justify-center overflow-hidden">
@@ -2689,9 +2601,8 @@ RULES:
               streamSrc={streamSrc}
               streamError={streamError}
               rssi={rssi}
-              solar={solar}
-              distance={telemetry.obstacle_distance}
               setStreamError={setStreamError}
+              setStreamSrc={setStreamSrc}
             />
           </div>
         </div>
@@ -2701,22 +2612,6 @@ RULES:
             onRecordVideo={handleRecordVideo} 
             isRecording={isRecording} 
           />
-          {telemetry.obstacle_distance !== undefined && (
-            <div className={`w-72 flex-shrink-0 pointer-events-none flex flex-col items-center justify-center gap-2 bg-black/40 backdrop-blur-xl p-3 rounded-xl border transition-all duration-300 shadow-[0_4px_30px_rgba(0,0,0,0.5)] ${telemetry.obstacle_distance < 15 ? 'border-red-500/50 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : telemetry.obstacle_distance < 30 ? 'border-yellow-500/50' : 'border-white/20'}`}>
-              <div className="w-full flex justify-between text-xs font-mono font-bold uppercase tracking-widest text-white/90">
-                <span>Proximity</span>
-                <span className={`transition-colors ${telemetry.obstacle_distance < 15 ? 'text-red-400 animate-pulse' : telemetry.obstacle_distance < 30 ? 'text-yellow-400' : 'text-green-400'}`}>
-                  {telemetry.obstacle_distance < 15 ? "BRAKE" : telemetry.obstacle_distance.toFixed(1) + " cm"}
-                </span>
-              </div>
-              <div className="w-full h-2 bg-black/60 rounded-full overflow-hidden border border-white/5 relative shadow-inner">
-                <div 
-                  className={`absolute left-0 top-0 bottom-0 transition-all duration-300 bg-gradient-to-r ${telemetry.obstacle_distance < 15 ? 'from-red-600 to-red-400 shadow-[0_0_10px_rgba(239,68,68,1)]' : telemetry.obstacle_distance < 30 ? 'from-yellow-600 to-yellow-400' : 'from-green-600 to-green-400'}`}
-                  style={{ width: `${Math.min(100, Math.max(0, (100 - telemetry.obstacle_distance)))}%` }} 
-                />
-              </div>
-            </div>
-          )}
         </div>
         </div>
 

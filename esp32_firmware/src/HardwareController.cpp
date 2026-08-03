@@ -8,7 +8,7 @@ HardwareController Hardware;
 HardwareController::HardwareController() {}
 
 void HardwareController::begin() {
-    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 100000);
+    Wire1.begin(I2C_SDA_PIN, I2C_SCL_PIN, 100000);
     delay(50);
     
     // Initialize PCA9685 - 1 (Chassis) at 0x40
@@ -24,12 +24,7 @@ void HardwareController::begin() {
     
     Serial.println("[SYS] Dual PCA9685 Daisy-Chain Initialized on Wire.");
 
-    // Initialize Sensors
-    pinMode(HC_SR04_TRIG_PIN, OUTPUT);
-    pinMode(HC_SR04_ECHO_PIN, INPUT);
-    // Configure ADC for ESP32-S3 (12-bit by default, but set 11db attenuation for 0-3.3V range)
-    analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);
-    
+
     // Ensure all motors are initially stopped
     drive(0, 0);
     
@@ -180,47 +175,4 @@ void HardwareController::stopArm() {
     pca2.setPWM(15, 0, 4096); pca2.setPWM(11, 0, 4096); pca2.setPWM(9, 0, 4096);
     // Base (12, 13, 14)
     pca2.setPWM(13, 0, 4096); pca2.setPWM(14, 0, 4096); pca2.setPWM(12, 0, 4096);
-}
-
-float HardwareController::getBatteryVoltage() {
-    long sum = 0;
-    int valid_count = 0;
-    for (int i = 0; i < 10; i++) {
-        int val = analogRead(BATTERY_ADC_PIN);
-        if (val > 50) { // Filter out erratic 0 drops
-            sum += val;
-            valid_count++;
-        }
-        delayMicroseconds(100);
-    }
-    
-    if (valid_count == 0) return -1.0; // Voltage divider is likely unplugged
-
-    int rawValue = sum / valid_count;
-    
-    // ESP32 ADC is 12-bit (0-4095) for 3.3V reference.
-    // 3.3V / 4095 = 0.00080586 V per unit
-    // Voltage Divider: V_batt = V_pin * ((33k + 10k) / 10k) = V_pin * 4.3
-    // Measures the RAW 12.6V line (placed before the buck converter) for Battery Safety
-    float vPin = rawValue * (3.3 / 4095.0);
-    return vPin * 4.3;
-}
-
-float HardwareController::getDistance() {
-    digitalWrite(HC_SR04_TRIG_PIN, LOW);
-    delayMicroseconds(2);
-    digitalWrite(HC_SR04_TRIG_PIN, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(HC_SR04_TRIG_PIN, LOW);
-    
-    // Disable interrupts briefly for accurate pulse-in reading without WiFi interference
-    // WARNING: Removing noInterrupts() because blocking Core 0 for 30ms with interrupts off kills WiFi!
-    long duration = pulseIn(HC_SR04_ECHO_PIN, HIGH, 30000); // 30ms strict timeout
-
-    if (duration == 0) return 999.0; // timeout or error
-    
-    // speed of sound = 343 m/s -> 29.15 us/cm
-    float distance = (duration / 2.0) / 29.1;
-    if (isnan(distance) || isinf(distance)) return 999.0;
-    return distance;
 }
