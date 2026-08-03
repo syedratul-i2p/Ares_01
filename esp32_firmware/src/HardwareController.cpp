@@ -20,6 +20,7 @@ void HardwareController::begin() {
     pca2.begin();
     pca2.setOscillatorFrequency(27000000);
     pca2.setPWMFreq(1000);
+    delay(10);
     
     Serial.println("[SYS] Dual PCA9685 Daisy-Chain Initialized on Wire.");
 
@@ -31,11 +32,13 @@ void HardwareController::begin() {
     
     // Ensure all motors are initially stopped
     drive(0, 0);
-    setArmMotor("base", 90);
-    setArmMotor("shoulder", 90);
-    setArmMotor("elbow", 90);
-    setArmMotor("wrist", 90);
-    setArmMotor("gripper", 90);
+    
+    // Center all servos on boot
+    setArmMotor("base", "", 90);
+    setArmMotor("shoulder", "", 90);
+    setArmMotor("elbow", "", 90);
+    setArmMotor("wrist", "", 90);
+    setArmMotor("gripper", "", 90);
 
     // Pull STBY HIGH for TB6612FNG on PCA1 Pin 15 (if used)
     pca1.setPWM(15, 4096, 0);
@@ -126,13 +129,57 @@ void HardwareController::stop() {
     Serial.println("[DRIVE] INSTANT BRAKE (STOP)");
 }
 
-void HardwareController::setArmMotor(String jointStr, int value) {
-    if (jointStr == "shoulder") { setMotorState(pca2, 6, 7, 8, value); }
-    else if (jointStr == "elbow") { setMotorState(pca2, 3, 4, 5, value); }
-    else if (jointStr == "wrist") { setMotorState(pca2, 0, 1, 2, value); }
-    else if (jointStr == "gripper") { setMotorState(pca2, 9, 15, 11, value); }
-    else if (jointStr == "base") { setMotorState(pca2, 12, 13, 14, value); }
+void HardwareController::setArmMotor(String jointStr, String direction, int absoluteAngle) {
+    jointStr.toLowerCase();
+    if (jointStr == "shoulder") { setMotorState(pca2, 6, 7, 8, absoluteAngle); }
+    else if (jointStr == "elbow") { setMotorState(pca2, 3, 4, 5, absoluteAngle); }
+    else if (jointStr == "wrist") { setMotorState(pca2, 0, 1, 2, absoluteAngle); }
+    else if (jointStr == "gripper") { setMotorState(pca2, 9, 15, 11, absoluteAngle); }
+    else if (jointStr == "base") { setMotorState(pca2, 12, 13, 14, absoluteAngle); }
     else { Serial.printf("[ARM ERR] Unknown Joint: %s\n", jointStr.c_str()); }
+}
+
+void HardwareController::driveArmMotor(String jointStr, String dir, int speed) {
+    int pwmPin = -1;
+    int in1Pin = -1;
+    int in2Pin = -1;
+
+    jointStr.toLowerCase();
+    dir.toLowerCase();
+
+    if (jointStr == "shoulder") { pwmPin = 6; in1Pin = 7; in2Pin = 8; }
+    else if (jointStr == "elbow") { pwmPin = 3; in1Pin = 4; in2Pin = 5; }
+    else if (jointStr == "wrist") { pwmPin = 0; in1Pin = 1; in2Pin = 2; }
+    else if (jointStr == "gripper") { pwmPin = 9; in1Pin = 15; in2Pin = 11; }
+    else if (jointStr == "base") { pwmPin = 12; in1Pin = 13; in2Pin = 14; }
+    else return;
+
+    if (dir == "up" || dir == "right" || dir == "open") {
+        pca2.setPWM(in1Pin, 4096, 0);
+        pca2.setPWM(in2Pin, 0, 4096);
+        pca2.setPWM(pwmPin, 0, speed);
+    } else if (dir == "down" || dir == "left" || dir == "close") {
+        pca2.setPWM(in1Pin, 0, 4096);
+        pca2.setPWM(in2Pin, 4096, 0);
+        pca2.setPWM(pwmPin, 0, speed);
+    } else {
+        pca2.setPWM(in1Pin, 0, 4096);
+        pca2.setPWM(in2Pin, 0, 4096);
+        pca2.setPWM(pwmPin, 0, 4096); // Brake
+    }
+}
+
+void HardwareController::stopArm() {
+    // Shoulder (6, 7, 8)
+    pca2.setPWM(7, 0, 4096); pca2.setPWM(8, 0, 4096); pca2.setPWM(6, 0, 4096);
+    // Elbow (3, 4, 5)
+    pca2.setPWM(4, 0, 4096); pca2.setPWM(5, 0, 4096); pca2.setPWM(3, 0, 4096);
+    // Wrist (0, 1, 2)
+    pca2.setPWM(1, 0, 4096); pca2.setPWM(2, 0, 4096); pca2.setPWM(0, 0, 4096);
+    // Gripper (9, 15, 11)
+    pca2.setPWM(15, 0, 4096); pca2.setPWM(11, 0, 4096); pca2.setPWM(9, 0, 4096);
+    // Base (12, 13, 14)
+    pca2.setPWM(13, 0, 4096); pca2.setPWM(14, 0, 4096); pca2.setPWM(12, 0, 4096);
 }
 
 float HardwareController::getBatteryVoltage() {

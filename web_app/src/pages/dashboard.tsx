@@ -17,42 +17,6 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
 
-function useContinuousAction(action: () => void, intervalMs: number = 50) {
-  const holdTimer = useRef<NodeJS.Timeout | null>(null);
-  const holdInterval = useRef<NodeJS.Timeout | null>(null);
-
-  const stopArmMove = useCallback(() => {
-    if (holdTimer.current) clearTimeout(holdTimer.current);
-    if (holdInterval.current) clearInterval(holdInterval.current);
-    holdTimer.current = null;
-    holdInterval.current = null;
-  }, []);
-
-  const startArmMove = useCallback((e: React.SyntheticEvent) => {
-    e.preventDefault();
-    stopArmMove();
-    action();
-    
-    holdTimer.current = setTimeout(() => {
-      holdInterval.current = setInterval(() => {
-        action();
-      }, intervalMs);
-    }, 250);
-  }, [action, intervalMs, stopArmMove]);
-
-  useEffect(() => {
-    return stopArmMove;
-  }, [stopArmMove]);
-
-  return {
-    onPointerDown: startArmMove,
-    onPointerUp: stopArmMove,
-    onPointerLeave: stopArmMove,
-    onPointerCancel: stopArmMove,
-    onContextMenu: (e: React.SyntheticEvent) => e.preventDefault(),
-  };
-}
-
 const normalizeBengaliNumbers = (text: string) => {
   const bengaliToEnglish: { [key: string]: string } = {
     '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
@@ -61,10 +25,30 @@ const normalizeBengaliNumbers = (text: string) => {
   return text.replace(/[০-৯]/g, match => bengaliToEnglish[match] || match);
 };
 
-const ContinuousButton = ({ onClick, className, children, 'data-testid': testId }: any) => {
-  const handlers = useContinuousAction(onClick, 50);
+const ContinuousButton = ({ onDown, onUp, className, children, 'data-testid': testId }: any) => {
+  const handleDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    if (e.currentTarget && e.currentTarget.setPointerCapture) {
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch(err){}
+    }
+    if (onDown) onDown();
+  }, [onDown]);
+
+  const handleUp = useCallback((e: React.SyntheticEvent) => {
+    if (onUp) onUp();
+  }, [onUp]);
+
   return (
-    <button className={className} data-testid={testId} {...handlers}>
+    <button 
+      className={className} 
+      data-testid={testId} 
+      onPointerDown={handleDown}
+      onPointerUp={handleUp}
+      onPointerLeave={handleUp}
+      onPointerCancel={handleUp}
+      onLostPointerCapture={handleUp}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       {children}
     </button>
   );
@@ -126,6 +110,7 @@ const sendCommandViaHttp = async (ip: string, payload: any) => {
   if (globalWs && globalWs.readyState === WebSocket.OPEN) {
     try {
       globalWs.send(JSON.stringify(payload));
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ares_connection_active"));
       return;
     } catch (err) {
       console.warn("WebSocket send failed, falling back to HTTP", err);
@@ -801,9 +786,10 @@ interface ArmControlsProps {
   editingJoint: keyof ArmAngles | null;
   setEditingJoint: React.Dispatch<React.SetStateAction<keyof ArmAngles | null>>;
   editValue: string;
-  setEditValue: React.Dispatch<React.SetStateAction<string>>;
-  commitEdit: (j: keyof ArmAngles) => void;
   startEdit: (j: keyof ArmAngles, v: number) => void;
+  sendArmCommand: (action: string, joint?: string, direction?: string) => void;
+  setActiveJoint: (j: keyof ArmAngles | null) => void;
+  setActiveDirection: (d: "UP" | "DOWN" | null) => void;
 }
 
 const ArmControls = React.memo(function ArmControls({
@@ -819,7 +805,10 @@ const ArmControls = React.memo(function ArmControls({
   editValue,
   setEditValue,
   commitEdit,
-  startEdit
+  startEdit,
+  sendArmCommand,
+  setActiveJoint,
+  setActiveDirection
 }: ArmControlsProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -1027,7 +1016,16 @@ const ArmControls = React.memo(function ArmControls({
                 {/* Center Column: Directional Buttons */}
                 <div className="flex items-center gap-6 md:gap-8 justify-center flex-1">
                   <ContinuousButton 
-                    onClick={() => updateJoint(key, -stepSize)}
+                    onDown={() => {
+                        setActiveJoint(key as keyof ArmAngles);
+                        setActiveDirection("DOWN");
+                        sendArmCommand("start", key, "DOWN");
+                    }}
+                    onUp={() => {
+                        setActiveJoint(null);
+                        setActiveDirection(null);
+                        sendArmCommand("stop");
+                    }}
                     className="h-8 w-12 md:h-7 md:w-14 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
                     data-testid={`btn-arm-${key}-dec`}>
                     {key === "base" ? <ArrowLeft className="w-5 h-5 md:w-4 md:h-4 text-slate-300" /> : 
@@ -1036,7 +1034,16 @@ const ArmControls = React.memo(function ArmControls({
                   </ContinuousButton>
                   
                   <ContinuousButton 
-                    onClick={() => updateJoint(key, stepSize)}
+                    onDown={() => {
+                        setActiveJoint(key as keyof ArmAngles);
+                        setActiveDirection("UP");
+                        sendArmCommand("start", key, "UP");
+                    }}
+                    onUp={() => {
+                        setActiveJoint(null);
+                        setActiveDirection(null);
+                        sendArmCommand("stop");
+                    }}
                     className="h-8 w-12 md:h-7 md:w-14 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
                     data-testid={`btn-arm-${key}-inc`}>
                     {key === "base" ? <ArrowRight className="w-5 h-5 md:w-4 md:h-4 text-slate-300" /> : 
@@ -1098,6 +1105,15 @@ export default function Dashboard() {
     heap: 0
   });
   const [roverOnline, setRoverOnline] = useState(false);
+
+  useEffect(() => {
+    const handleActive = () => {
+      setRoverOnline(true);
+    };
+    window.addEventListener("ares_connection_active", handleActive);
+    return () => window.removeEventListener("ares_connection_active", handleActive);
+  }, []);
+
   const [aiTaskState, setAiTaskState] = useState<"idle" | "rotate_to_scan" | "await_lock" | "approach" | "pickup">("idle");
   const aiTaskStateRef = useRef(aiTaskState);
   useEffect(() => { aiTaskStateRef.current = aiTaskState; }, [aiTaskState]);
@@ -1117,9 +1133,10 @@ export default function Dashboard() {
       
       let lastPacketTime = Date.now();
       
+      const onActive = () => { lastPacketTime = Date.now(); };
+      window.addEventListener("ares_connection_active", onActive);
+      
       const updateTelemetry = (data: any) => {
-        setRoverOnline(true);
-        lastPacketTime = Date.now();
         setTelemetry(prev => ({
           ...prev,
           obstacle_distance: data.obstacle_distance ?? data.distance ?? prev.obstacle_distance,
@@ -1135,6 +1152,8 @@ export default function Dashboard() {
       globalWs = telemetryWs;
       
       telemetryWs.onmessage = (e) => {
+        setRoverOnline(true);
+        lastPacketTime = Date.now();
         try {
           updateTelemetry(JSON.parse(e.data));
         } catch (err) {}
@@ -1144,7 +1163,13 @@ export default function Dashboard() {
         try {
           const res = await fetch(`http://${ip}/telemetry`);
           if (res.ok) {
-            updateTelemetry(await res.json());
+            if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ares_connection_active"));
+            setRoverOnline(true);
+            lastPacketTime = Date.now();
+            const rawText = await res.text();
+            try {
+              updateTelemetry(JSON.parse(rawText));
+            } catch (err) {}
           }
         } catch (err) {}
         
@@ -1152,7 +1177,6 @@ export default function Dashboard() {
           setRoverOnline(false);
         }
       }, 1000);
-      
       const resetTelemetry = () => {
         setRoverOnline(false);
         setTelemetry(prev => ({
@@ -1168,6 +1192,7 @@ export default function Dashboard() {
       telemetryWs.onerror = resetTelemetry;
 
       return () => {
+        window.removeEventListener("ares_connection_active", onActive);
         clearInterval(pollInterval);
         globalWs = null;
         telemetryWs.close();
@@ -1612,6 +1637,15 @@ export default function Dashboard() {
     sendCommandViaHttp(url, payload).catch(e => { console.error(e); toast.error(String(e)); });
   }, []);
 
+  const sendArmCommand = useCallback((action: string, joint?: string, direction?: string) => {
+    if (commandUrl) {
+      const payload: any = { mode: "arm", action: action };
+      if (joint) payload.joint = joint;
+      if (direction) payload.direction = direction;
+      sendCommandViaHttp(commandUrl, payload).catch(console.error);
+    }
+  }, [commandUrl]);
+
   const updateJoint = useCallback((joint: keyof ArmAngles, delta: number) => {
     setJoints(prev => {
       const nextAngle = Math.max(10, Math.min(170, prev[joint] + delta));
@@ -1624,6 +1658,22 @@ export default function Dashboard() {
       return next;
     });
   }, [commandUrl]);
+
+  // ── Restore local UI animation loop purely for the graphic rendering
+  const [activeJoint, setActiveJoint] = useState<keyof ArmAngles | null>(null);
+  const [activeArmDirection, setActiveArmDirection] = useState<"UP" | "DOWN" | null>(null);
+
+  useEffect(() => {
+    if (!activeJoint || !activeArmDirection) return;
+    const interval = setInterval(() => {
+      setJoints(prev => {
+        const delta = activeArmDirection === "UP" ? 3 : -3;
+        const nextAngle = Math.max(10, Math.min(170, prev[activeJoint] + delta));
+        return { ...prev, [activeJoint]: nextAngle };
+      });
+    }, 50);
+    return () => clearInterval(interval);
+  }, [activeJoint, activeArmDirection]);
 
   const setJointAngle = useCallback((joint: keyof ArmAngles, raw: number) => {
     const val = Math.max(10, Math.min(170, raw));
@@ -2720,6 +2770,9 @@ RULES:
                       setEditValue={setEditValue}
                       commitEdit={commitEdit}
                       startEdit={startEdit}
+                      sendArmCommand={sendArmCommand}
+                      setActiveJoint={setActiveJoint}
+                      setActiveDirection={setActiveArmDirection}
                     />
                   </div>
 

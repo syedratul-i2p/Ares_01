@@ -33,8 +33,9 @@ public:
     void stop();
     
     // Arm Drive (PCA-2)
-    // joint: 0-4
-    void setArmMotor(String joint, int value);
+    void setArmMotor(String joint, String direction, int absoluteAngle);
+    void driveArmMotor(String joint, String dir, int speed);
+    void stopArm();
 
     // Telemetry
     float getBatteryVoltage();
