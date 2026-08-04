@@ -437,7 +437,6 @@ void streamTask(void *pvParameters) {
 
 void controlTask(void *pvParameters) {
   for (;;) {
-    webSocket.loop();
 
     static unsigned long lastSlowHeartbeat = 0;
     if (millis() - lastSlowHeartbeat > 2000) {
@@ -494,8 +493,7 @@ void controlTask(void *pvParameters) {
 
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Disable Brownout detector
-  vTaskDelay(pdMS_TO_TICKS(
-      1000)); // Guard delay to let voltage rails stabilize post-power-on
+  delay(2000);
   Serial.begin(115200);
 
   // Initialize Custom Hardware Controller (I2C, PWM, Sensors)
@@ -520,6 +518,7 @@ void setup() {
   vTaskDelay(pdMS_TO_TICKS(100));
 
   WiFi.setSleep(false);
+  delay(500);
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(ap_ssid, ap_password, 6, 0, 4);
   ESP_LOGI(TAG_WIFI, "AP Live on Channel 6. IP: %s",
@@ -552,6 +551,8 @@ void setup() {
     WiFi.mode(WIFI_AP);
     ESP_LOGI(TAG_WIFI, "Running strictly in Offline AP Mode.");
   }
+
+  delay(1000);
 
   server.enableCORS(true);
 
@@ -604,9 +605,24 @@ void setup() {
 
   server.begin();
   webSocket.begin();
-  webSocket.enableHeartbeat(15000, 3000, 2);
+  webSocket.enableHeartbeat(15000, 4000, 3);
   webSocket.onEvent(webSocketEvent);
   ESP_LOGI(TAG_SYS, "Monolithic Web Server and WebSocket Server Started.");
+
+  xTaskCreatePinnedToCore(
+      [](void *pvParameters) {
+          for (;;) {
+              webSocket.loop();
+              vTaskDelay(pdMS_TO_TICKS(15));
+          }
+      },
+      "WS_Loop_Task",
+      4096,
+      NULL,
+      2,
+      NULL,
+      1
+  );
 
   xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 2,
                           &streamTaskHandle, 1);
