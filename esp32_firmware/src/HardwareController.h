@@ -9,12 +9,12 @@
 #define I2C_SDA_PIN 1
 #define I2C_SCL_PIN 2
 
-// SENSOR MAPPING (ERADICATED)
+
 
 class HardwareController {
 private:
-    Adafruit_PWMServoDriver pca1 = Adafruit_PWMServoDriver(0x40, Wire1); // Chassis
-    Adafruit_PWMServoDriver pca2 = Adafruit_PWMServoDriver(0x41, Wire1); // Arm
+    Adafruit_PWMServoDriver pca1 = Adafruit_PWMServoDriver(0x40); // Chassis
+    Adafruit_PWMServoDriver pca2 = Adafruit_PWMServoDriver(0x41); // Arm
 
     // Helper for PCA9685 PWM
     void setPWM(Adafruit_PWMServoDriver &pwm, uint8_t channel, uint16_t on, uint16_t off);
@@ -33,11 +33,7 @@ public:
     void setArmMotor(String joint, String direction, int absoluteAngle);
     void driveArmMotor(String joint, String dir, int speed);
     void stopArm();
-
-    // Telemetry
-
 };
-
 extern HardwareController Hardware;
 
 #endif // HARDWARE_CONTROLLER_H

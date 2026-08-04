@@ -9,7 +9,6 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFi.h>
-#include <esp_wifi.h>
 
 // Function Prototypes
 void executeHardwareCommand(String mode, String action, String direction,
@@ -17,6 +16,7 @@ void executeHardwareCommand(String mode, String action, String direction,
 void handleCommand();
 void stream_handler();
 void handleCapture();
+void mjpegTask(void *pvParameters);
 
 // Global Hardware Fault Flags
 bool camera_fault = false;
@@ -62,13 +62,8 @@ WebSocketsServer webSocket(81);
 Preferences preferences;
 unsigned long lastTelemetryTime = 0;
 
-String getTelemetryJSON() { return "{\"ping\": true}"; }
-
-void sendTelemetryData() {
-  String telemetryPayload = getTelemetryJSON();
-  Serial.println("[TELEMETRY] " + telemetryPayload);
-  webSocket.broadcastTXT(telemetryPayload);
-}
+WiFiClient globalStreamClient;
+volatile bool isStreaming = false;
 
 #define PART_BOUNDARY "123456789000000000000987654321"
 static const char *_STREAM_CONTENT_TYPE =
@@ -165,89 +160,76 @@ void handleCommand() {
               "{\"status\":\"error\", \"message\":\"Unknown Action\"}");
 }
 
-volatile bool stream_active = false;
-
 void stream_handler() {
   if (camera_fault) {
     server.send(503, "text/plain", "Camera Hardware Fault");
     return;
   }
 
-  if (stream_active) {
-    ESP_LOGW(TAG_HTTP, "Stream already active. Rejecting new client with 429.");
-    server.send(429, "text/plain", "Too Many Requests");
+  globalStreamClient = server.client();
+  if (!globalStreamClient.connected())
     return;
-  }
-  stream_active = true;
 
-  WiFiClient client = server.client();
-  if (!client.connected()) {
-    stream_active = false;
-    return;
-  }
+  globalStreamClient.setNoDelay(true);
 
-  // Disable Nagle's algorithm for immediate transmission of motion frames
-  client.setNoDelay(true);
+  ESP_LOGI(TAG_HTTP, "MJPEG Stream client connected. Handing off to FreeRTOS task.");
+  globalStreamClient.print("HTTP/1.1 200 OK\r\n");
+  globalStreamClient.print("Access-Control-Allow-Origin: *\r\n");
+  globalStreamClient.print("Access-Control-Allow-Methods: GET, OPTIONS\r\n");
+  globalStreamClient.print("Access-Control-Allow-Private-Network: true\r\n");
+  globalStreamClient.print("Cache-Control: no-cache, private, no-store, must-revalidate\r\n");
+  globalStreamClient.print("Pragma: no-cache\r\n");
+  globalStreamClient.print("Content-Type: ");
+  globalStreamClient.print(_STREAM_CONTENT_TYPE);
+  globalStreamClient.print("\r\n\r\n");
 
-  ESP_LOGI(TAG_HTTP, "MJPEG Stream client connected.");
-  client.print("HTTP/1.1 200 OK\r\n");
-  client.print("Access-Control-Allow-Origin: *\r\n");
-  client.print("Access-Control-Allow-Methods: GET, OPTIONS\r\n");
-  client.print("Access-Control-Allow-Private-Network: true\r\n");
-  client.print(
-      "Cache-Control: no-cache, private, no-store, must-revalidate\r\n");
-  client.print("Pragma: no-cache\r\n");
-  client.print("Content-Type: ");
-  client.print(_STREAM_CONTENT_TYPE);
-  client.print("\r\n\r\n");
+  isStreaming = true;
+  // Return immediately to unblock the HTTP Server thread
+}
 
-  camera_fb_t *fb = NULL;
+void mjpegTask(void *pvParameters) {
   char part_buf[128];
-
-  unsigned long frame_count = 0; // Initialize frame counter
-
+  unsigned long frame_count = 0;
   uint8_t fail_count = 0;
 
-  while (client.connected()) {
-
-    fb = esp_camera_fb_get();
-    if (!fb) {
-      fail_count++;
-      ESP_LOGE(TAG_CAM, "Capture failed. Retrying... (%d/3)", fail_count);
-      vTaskDelay(pdMS_TO_TICKS(50));
-      if (fail_count >= 3) {
-        ESP_LOGE(TAG_SYS, "Stream aborted due to consecutive failures. Freeing "
-                          "server thread.");
-        break;
+  for (;;) {
+    if (isStreaming && globalStreamClient.connected()) {
+      camera_fb_t *fb = esp_camera_fb_get();
+      if (!fb) {
+        fail_count++;
+        ESP_LOGE(TAG_CAM, "Capture failed. Retrying... (%d/5)", fail_count);
+        if (fail_count >= 5) {
+          ESP_LOGE(TAG_SYS, "Camera Fault! Halting MJPEG stream.");
+          camera_fault = true;
+          isStreaming = false;
+          globalStreamClient.stop();
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+        continue;
       }
-      continue;
-    }
-    fail_count = 0; // reset on success
-    size_t hlen = snprintf(part_buf, 128, _STREAM_PART, fb->len);
-    size_t w1 = client.write((const uint8_t *)_STREAM_BOUNDARY,
-                             strlen(_STREAM_BOUNDARY));
-    size_t w2 = client.write((const uint8_t *)part_buf, hlen);
-    size_t w3 = client.write(fb->buf, fb->len);
-    esp_camera_fb_return(fb);
+      fail_count = 0;
+      size_t hlen = snprintf(part_buf, 128, _STREAM_PART, fb->len);
+      globalStreamClient.write((const uint8_t *)_STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
+      globalStreamClient.write((const uint8_t *)part_buf, hlen);
+      globalStreamClient.write(fb->buf, fb->len);
+      esp_camera_fb_return(fb);
 
-    if (w1 == 0 || w2 == 0 || w3 == 0) {
-      ESP_LOGW(TAG_HTTP, "Stream write failed. Disconnecting client.");
-      break;
+      frame_count++;
+      if (frame_count % 100 == 0) {
+        ESP_LOGI(TAG_CAM, "Streaming active... Successfully sent %lu frames.", frame_count);
+      }
+      vTaskDelay(pdMS_TO_TICKS(15));
+    } else {
+      if (isStreaming) {
+        // Client disconnected
+        isStreaming = false;
+        globalStreamClient.stop();
+        ESP_LOGI(TAG_HTTP, "MJPEG Stream client disconnected. Total frames sent: %lu", frame_count);
+        frame_count = 0;
+      }
+      vTaskDelay(pdMS_TO_TICKS(50));
     }
-
-    frame_count++;
-    if (frame_count % 100 == 0) {
-      ESP_LOGI(TAG_CAM, "Streaming active... Successfully sent %lu frames.",
-               frame_count);
-    }
-    vTaskDelay(pdMS_TO_TICKS(10));
   }
-
-  client.stop();
-  stream_active = false;
-  ESP_LOGI(TAG_HTTP, "MJPEG Stream client disconnected. Total frames sent: %lu",
-           frame_count);
-  vTaskDelay(pdMS_TO_TICKS(5));
 }
 
 void handleCapture() {
@@ -292,12 +274,24 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload,
     ESP_LOGI(TAG_SYS, "WebSocket Client [%u] Connected from %s", num,
              ip.toString().c_str());
     // Force immediate live telemetry dispatch (No dummy data)
-    sendTelemetryData();
   } break;
   case WStype_TEXT: {
     StaticJsonDocument<512> doc;
     DeserializationError error = deserializeJson(doc, payload);
     if (!error) {
+      if (doc.containsKey("ping") && doc["ping"] == true) {
+        webSocket.sendTXT(num, "{\"pong\": true, \"status\": \"online\", \"distance\": 999, \"battery\": 100}");
+        break;
+      }
+      if (doc.containsKey("action")) {
+        String act = doc["action"].as<String>();
+        act.toLowerCase();
+        if (act == "reset" || act == "reboot") {
+          webSocket.sendTXT(num, "{\"status\": \"rebooting\"}");
+          delay(500);
+          ESP.restart();
+        }
+      }
       String mode = doc["mode"] | "manual";
       String action = doc["action"] | "drive";
       String direction = doc["direction"] | "stop";
@@ -369,8 +363,8 @@ void streamTask(void *pvParameters) {
 
   if (psramFound()) {
     ESP_LOGI(TAG_CAM, "PSRAM Found. Initializing stable buffers.");
-    config.frame_size = FRAMESIZE_VGA;
-    config.jpeg_quality = 12;
+    config.frame_size = FRAMESIZE_UXGA;
+    config.jpeg_quality = 14;
     config.fb_count = 2;
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_LATEST;
@@ -399,17 +393,22 @@ void streamTask(void *pvParameters) {
     esp_restart(); // Force hardware reboot if camera remains unresponsive
   } else {
     ESP_LOGI(TAG_CAM, "Warming up sensor AEC/AGC...");
-    int warmup_limit = 0;
-    while (warmup_limit < 5) {
+    uint8_t warmup_fail_count = 0;
+    for (int i = 0; i < 10; i++) {
       camera_fb_t *fb = esp_camera_fb_get();
-      if (!fb) {
-        Serial.printf("[CAM] Warmup frame dropped (%d)\n", warmup_limit);
-        warmup_limit++;
-        vTaskDelay(pdMS_TO_TICKS(100)); // Crucial delay to free up CPU
-        continue;
+      if (fb) {
+        esp_camera_fb_return(fb);
+        warmup_fail_count = 0;
+      } else {
+        warmup_fail_count++;
+        if (warmup_fail_count >= 5) {
+          ESP_LOGE(TAG_SYS, "Camera Fault! Bypassing camera hardware but "
+                            "keeping HTTP server alive.");
+          camera_fault = true;
+          break;
+        }
       }
-      esp_camera_fb_return(fb);
-      break;
+      vTaskDelay(pdMS_TO_TICKS(20));
     }
 
     sensor_t *s = esp_camera_sensor_get();
@@ -439,9 +438,11 @@ void streamTask(void *pvParameters) {
 void controlTask(void *pvParameters) {
   for (;;) {
     webSocket.loop();
-    if (millis() - lastTelemetryTime > 500) {
-      sendTelemetryData();
-      lastTelemetryTime = millis();
+
+    static unsigned long lastSlowHeartbeat = 0;
+    if (millis() - lastSlowHeartbeat > 2000) {
+      webSocket.broadcastTXT("{\"status\": \"online\", \"distance\": 999, \"battery\": 100}");
+      lastSlowHeartbeat = millis();
     }
 
     static bool was_arm_moving = false;
@@ -519,7 +520,6 @@ void setup() {
   vTaskDelay(pdMS_TO_TICKS(100));
 
   WiFi.setSleep(false);
-  esp_wifi_set_ps(WIFI_PS_NONE);
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(ap_ssid, ap_password, 6, 0, 4);
   ESP_LOGI(TAG_WIFI, "AP Live on Channel 6. IP: %s",
@@ -555,10 +555,8 @@ void setup() {
 
   server.enableCORS(true);
 
-  server.on("/", HTTP_GET, []() {
-    server.send(200, "text/plain", "ARES-01 Rover API");
-    vTaskDelay(pdMS_TO_TICKS(5));
-  });
+  server.on("/", HTTP_GET,
+            []() { server.send(200, "text/plain", "ARES-01 ONLINE"); });
 
   server.on("/command", HTTP_POST, handleCommand);
   server.on("/command", HTTP_OPTIONS, []() {
@@ -575,7 +573,8 @@ void setup() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
     server.sendHeader("Access-Control-Allow-Private-Network", "true");
     server.sendHeader("Cache-Control", "no-cache");
-    server.send(200, "application/json", getTelemetryJSON());
+    server.send(200, "application/json",
+                "{\"battery\":100, \"distance\":10, \"status\":\"ok\"}");
   });
 
   server.onNotFound([]() {
@@ -589,16 +588,32 @@ void setup() {
     }
   });
 
+  server.on("/reset", HTTP_ANY, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", "{\"status\":\"rebooting\"}");
+    delay(500);
+    ESP.restart();
+  });
+  
+  server.on("/reboot", HTTP_ANY, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", "{\"status\":\"rebooting\"}");
+    delay(500);
+    ESP.restart();
+  });
+
   server.begin();
   webSocket.begin();
   webSocket.enableHeartbeat(15000, 3000, 2);
   webSocket.onEvent(webSocketEvent);
   ESP_LOGI(TAG_SYS, "Monolithic Web Server and WebSocket Server Started.");
 
-  xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 1,
+  xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 2,
                           &streamTaskHandle, 1);
-  xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 1,
+  xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 2,
                           &controlTaskHandle, 0);
+  xTaskCreatePinnedToCore(mjpegTask, "MjpegTask", 8192, NULL, 1,
+                          NULL, 1);
   ESP_LOGI(TAG_SYS, "FreeRTOS Dual-Core Architecture initialized!");
 }
 

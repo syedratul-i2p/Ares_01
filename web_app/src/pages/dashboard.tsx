@@ -2302,6 +2302,10 @@ RULES:
     setCommandUrl(newCommandUrl);
     setRoverIp(cleanIp);
     
+    // Bind stream instantly
+    setStreamError(false);
+    setStreamSrc(newStreamUrl);
+    
     // Ping to verify connection
     const startTime = performance.now();
     fetch(newCommandUrl, { method: "GET", mode: "no-cors", cache: "no-store" })
@@ -2310,9 +2314,6 @@ RULES:
         setPing(latency);
         setRoverOnline(true);
         toast.success("Connected to Rover");
-        
-        setStreamError(false);
-        setStreamSrc(newStreamUrl);
       })
       .catch((err) => {
         setRoverOnline(false);

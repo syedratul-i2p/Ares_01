@@ -8,7 +8,10 @@ HardwareController Hardware;
 HardwareController::HardwareController() {}
 
 void HardwareController::begin() {
-    Wire1.begin(I2C_SDA_PIN, I2C_SCL_PIN, 100000);
+    if (!Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 100000)) {
+        Serial.println("[ERR] Wire init failed! Skipping PCA setup to maintain network stack.");
+        return;
+    }
     delay(50);
     
     // Initialize PCA9685 - 1 (Chassis) at 0x40
@@ -24,7 +27,8 @@ void HardwareController::begin() {
     
     Serial.println("[SYS] Dual PCA9685 Daisy-Chain Initialized on Wire.");
 
-
+    // (Sensors physically removed to prevent CPU blocking)
+    
     // Ensure all motors are initially stopped
     drive(0, 0);
     
@@ -176,3 +180,5 @@ void HardwareController::stopArm() {
     // Base (12, 13, 14)
     pca2.setPWM(13, 0, 4096); pca2.setPWM(14, 0, 4096); pca2.setPWM(12, 0, 4096);
 }
+
+
