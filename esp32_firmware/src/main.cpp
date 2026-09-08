@@ -166,71 +166,34 @@ void stream_handler() {
     return;
   }
 
-  globalStreamClient = server.client();
-  if (!globalStreamClient.connected())
-    return;
+  WiFiClient client = server.client();
+  if (!client.connected()) return;
+  client.setNoDelay(true);
 
-  globalStreamClient.setNoDelay(true);
+  server.sendContent("HTTP/1.1 200 OK\r\n"
+                     "Content-Type: multipart/x-mixed-replace; boundary=123456789000000000000987654321\r\n"
+                     "Access-Control-Allow-Origin: *\r\n"
+                     "Cache-Control: no-cache, private\r\n\r\n");
 
-  ESP_LOGI(TAG_HTTP, "MJPEG Stream client connected. Handing off to FreeRTOS task.");
-  globalStreamClient.print("HTTP/1.1 200 OK\r\n");
-  globalStreamClient.print("Access-Control-Allow-Origin: *\r\n");
-  globalStreamClient.print("Access-Control-Allow-Methods: GET, OPTIONS\r\n");
-  globalStreamClient.print("Access-Control-Allow-Private-Network: true\r\n");
-  globalStreamClient.print("Cache-Control: no-cache, private, no-store, must-revalidate\r\n");
-  globalStreamClient.print("Pragma: no-cache\r\n");
-  globalStreamClient.print("Content-Type: ");
-  globalStreamClient.print(_STREAM_CONTENT_TYPE);
-  globalStreamClient.print("\r\n\r\n");
-
-  isStreaming = true;
-  // Return immediately to unblock the HTTP Server thread
-}
-
-void mjpegTask(void *pvParameters) {
   char part_buf[128];
-  unsigned long frame_count = 0;
-  uint8_t fail_count = 0;
-
-  for (;;) {
-    if (isStreaming && globalStreamClient.connected()) {
-      camera_fb_t *fb = esp_camera_fb_get();
-      if (!fb) {
-        fail_count++;
-        ESP_LOGE(TAG_CAM, "Capture failed. Retrying... (%d/5)", fail_count);
-        if (fail_count >= 5) {
-          ESP_LOGE(TAG_SYS, "Camera Fault! Halting MJPEG stream.");
-          camera_fault = true;
-          isStreaming = false;
-          globalStreamClient.stop();
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));
-        continue;
-      }
-      fail_count = 0;
-      size_t hlen = snprintf(part_buf, 128, _STREAM_PART, fb->len);
-      globalStreamClient.write((const uint8_t *)_STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
-      globalStreamClient.write((const uint8_t *)part_buf, hlen);
-      globalStreamClient.write(fb->buf, fb->len);
-      esp_camera_fb_return(fb);
-
-      frame_count++;
-      if (frame_count % 100 == 0) {
-        ESP_LOGI(TAG_CAM, "Streaming active... Successfully sent %lu frames.", frame_count);
-      }
-      vTaskDelay(pdMS_TO_TICKS(15));
-    } else {
-      if (isStreaming) {
-        // Client disconnected
-        isStreaming = false;
-        globalStreamClient.stop();
-        ESP_LOGI(TAG_HTTP, "MJPEG Stream client disconnected. Total frames sent: %lu", frame_count);
-        frame_count = 0;
-      }
-      vTaskDelay(pdMS_TO_TICKS(50));
+  while (client.connected()) {
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (!fb) {
+      vTaskDelay(pdMS_TO_TICKS(100));
+      continue;
     }
+
+    size_t hlen = snprintf(part_buf, 128, _STREAM_PART, fb->len);
+    client.write((const uint8_t *)_STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
+    client.write((const uint8_t *)part_buf, hlen);
+    client.write(fb->buf, fb->len);
+    esp_camera_fb_return(fb);
+
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
+
+// mjpegTask removed, streaming handled inline in stream_handler
 
 void handleCapture() {
   if (camera_fault) {
@@ -628,8 +591,6 @@ void setup() {
                           &streamTaskHandle, 1);
   xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 2,
                           &controlTaskHandle, 0);
-  xTaskCreatePinnedToCore(mjpegTask, "MjpegTask", 8192, NULL, 1,
-                          NULL, 1);
   ESP_LOGI(TAG_SYS, "FreeRTOS Dual-Core Architecture initialized!");
 }
 

@@ -558,6 +558,9 @@ interface CameraViewProps {
   rssi: number | undefined;
   setStreamError: React.Dispatch<React.SetStateAction<boolean>>;
   setStreamSrc: React.Dispatch<React.SetStateAction<string | null>>;
+  roverOnline: boolean;
+  roverIp: string;
+  rotation: number;
 }
 
 const CameraView = React.memo(function CameraView({
@@ -565,91 +568,107 @@ const CameraView = React.memo(function CameraView({
   streamError,
   rssi,
   setStreamError,
-  setStreamSrc
+  setStreamSrc,
+  roverOnline,
+  roverIp,
+  rotation
 }: CameraViewProps) {
-  // The fetchFrame useEffect and blobUrl have been removed to prevent 
-  // aggressive double-streaming which exhausts ESP32 TCP sockets.
+  const [isStreamLoading, setIsStreamLoading] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [aspectScale, setAspectScale] = useState(1.35);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setAspectScale(Math.max(width / height, height / width));
+        }
+      }
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <div className="relative w-full h-full bg-[#050505] overflow-hidden">
-      {streamSrc && !streamError ? (
-        <img 
-          key={streamSrc}
-          src={streamSrc} 
-          alt="ARES-01 live feed"
-          crossOrigin="anonymous"
-          className="w-full h-full object-cover rounded-xl transform-gpu translate-z-0 will-change-transform pointer-events-none select-none"
-          onLoadStart={() => console.log(`[ARES-01] Camera stream loading from ${streamSrc}`)}
-          onError={(e) => {
-            const target = e.currentTarget;
-            const currentSrc = target.src;
-            const now = Date.now();
-            
-            // Check dataset for last retry timestamp
-            const lastRetry = parseInt(target.dataset.lastRetry || "0", 10);
-            
-            // Enforce 2000ms cooldown
-            if (now - lastRetry < 2000) {
-              console.warn(`[ARES-01] Stream error throttle active. Suppressing reload.`);
-              return;
-            }
-            target.dataset.lastRetry = now.toString();
-            
-            if (currentSrc.includes(":81/")) {
-              console.log(`[ARES-01] Port 81 failed, falling back to port 80...`);
-              target.src = currentSrc.replace(":81/", "/");
-            } else {
-              console.error(`[ARES-01] Camera stream error at ${currentSrc}. Connection refused or timed out. Retrying in 2s...`);
-              setTimeout(() => {
-                if (streamSrc) {
-                  target.src = `${streamSrc.split('?')[0]}?cb=${Date.now()}`;
-                }
-              }, 2000);
-            }
-          }}
-          data-testid="camera-feed"
-        />
-      ) : (
-        <>
-          {/* Ambient AI visual glow layers behind the grid */}
-          <div 
-            className="absolute left-0 top-0 bottom-0 w-1/4 bg-gradient-to-b from-cyan-400/10 via-purple-500/10 to-indigo-500/10 blur-2xl animate-pulse pointer-events-none z-0"
-            style={{ animationDuration: '4000ms' }}
+    <div ref={containerRef} className="relative w-full h-full bg-[#050505] overflow-hidden flex items-center justify-center">
+      <div 
+        className="relative w-full h-full origin-center transform-gpu will-change-transform z-10"
+        style={{ 
+          transform: `rotate(${rotation}deg) scale(${rotation % 180 !== 0 ? aspectScale : 1})`,
+          transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+        }}
+      >
+        {roverOnline && streamSrc ? (
+          <img 
+            id="rover-video-stream"
+            key={streamSrc}
+            src={streamSrc} 
+            alt="ARES-01 live feed"
+            crossOrigin="anonymous"
+            className="w-full h-full object-cover rounded-xl pointer-events-none select-none"
+            style={{ display: streamError || !roverOnline ? 'none' : 'block' }}
+            onLoad={() => {
+              setIsStreamLoading(false);
+              setStreamError(false);
+            }}
+            onLoadStart={() => console.log(`[ARES-01] Camera stream loading from ${streamSrc}`)}
+            onError={(e) => {
+              setStreamError(true);
+              setIsStreamLoading(false);
+            }}
+            data-testid="camera-feed"
           />
-          <div 
-            className="absolute right-0 top-0 bottom-0 w-1/4 bg-gradient-to-b from-cyan-400/10 via-purple-500/10 to-indigo-500/10 blur-2xl animate-pulse pointer-events-none z-0"
-            style={{ animationDuration: '4000ms' }}
-          />
-          <div className="absolute inset-0 opacity-[0.04] pointer-events-none z-10"
-            style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.15) 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 z-20">
-            {streamError ? (
-              <>
-                <AlertTriangle className="w-10 h-10 text-red-500 animate-pulse mb-1" />
-                <span className="text-red-400 font-mono text-base font-bold tracking-widest">⚠️ CAMERA SENSOR FAULT</span>
-                <span className="text-white/70 font-mono text-sm mt-1 text-center max-w-xs">Physical connection lost. Check ribbon cable & power supply.</span>
-                <button 
-                  onClick={() => {
-                    setStreamError(false);
-                    if (streamSrc) {
-                      const base = streamSrc.split('?')[0];
-                      setStreamSrc(`${base}?cb=${Date.now()}`);
-                    }
-                  }}
-                  className="mt-5 px-5 py-2 bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 rounded-lg text-red-100 font-mono text-sm transition-all duration-300 cursor-pointer shadow-[0_0_15px_rgba(239,68,68,0.3)] hover:shadow-[0_0_25px_rgba(239,68,68,0.5)] active:scale-95"
-                >
-                  RETRY CAMERA
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="text-white/15 font-mono text-xl tracking-widest select-none">FEED — ESP32-CAM</span>
-                <span className="text-white/10 font-mono text-xs">Enter rover IP in Settings to connect</span>
-              </>
-            )}
+        ) : null}
+
+        {(streamError || !roverOnline || isStreamLoading) && (
+          <div className="absolute inset-0">
+            {/* Ambient AI visual glow layers behind the grid */}
+            <div 
+              className="absolute left-0 top-0 bottom-0 w-1/4 bg-gradient-to-b from-cyan-400/10 via-purple-500/10 to-indigo-500/10 blur-2xl animate-pulse pointer-events-none z-0"
+              style={{ animationDuration: '4000ms' }}
+            />
+            <div 
+              className="absolute right-0 top-0 bottom-0 w-1/4 bg-gradient-to-b from-cyan-400/10 via-purple-500/10 to-indigo-500/10 blur-2xl animate-pulse pointer-events-none z-0"
+              style={{ animationDuration: '4000ms' }}
+            />
+            <div className="absolute inset-0 opacity-[0.04] pointer-events-none z-10"
+              style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.15) 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 z-20">
+              {streamError ? (
+                <>
+                  <AlertTriangle className="w-10 h-10 text-red-500 animate-pulse mb-1" />
+                  <span className="text-red-400 font-mono text-base font-bold tracking-widest">⚠️ CAMERA SENSOR FAULT</span>
+                  <span className="text-white/70 font-mono text-sm mt-1 text-center max-w-xs">Physical connection lost. Check ribbon cable & power supply.</span>
+                  <button 
+                    onClick={() => {
+                      setStreamError(false);
+                      setIsStreamLoading(true);
+                      if (streamSrc) {
+                        const base = streamSrc.split('?')[0];
+                        setStreamSrc(`${base}?cb=${Date.now()}`);
+                      }
+                    }}
+                    className="mt-5 px-5 py-2 bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 rounded-lg text-red-100 font-mono text-sm transition-all duration-300 cursor-pointer shadow-[0_0_15px_rgba(239,68,68,0.3)] hover:shadow-[0_0_25px_rgba(239,68,68,0.5)] active:scale-95"
+                  >
+                    RETRY CAMERA
+                  </button>
+                </>
+              ) : !roverOnline ? (
+                <>
+                  <span className="text-white/15 font-mono text-xl tracking-widest select-none">CAMERA OFFLINE</span>
+                  <span className="text-white/10 font-mono text-xs">AWAITING ROVER TELEMETRY & FEED</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-white/30 font-mono text-xl tracking-widest select-none animate-pulse">CONNECTING...</span>
+                </>
+              )}
+            </div>
           </div>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 });
@@ -1044,6 +1063,15 @@ export default function Dashboard() {
   const [roverIp, setRoverIp] = useState("");
   const [streamSrc, setStreamSrc] = useState<string | null>(null);
   const [streamError, setStreamError] = useState(false);
+  const [rotation, setRotation] = useState<number>(() => Number(localStorage.getItem('ares_cam_rotation') || 0));
+
+  useEffect(() => {
+    localStorage.setItem('ares_cam_rotation', rotation.toString());
+  }, [rotation]);
+
+  const handleRotate = useCallback(() => {
+    setRotation(prev => (prev + 90) % 360);
+  }, []);
 
   // ── Toast Notification State
 
@@ -1220,22 +1248,43 @@ export default function Dashboard() {
       }
       
       const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth || 800;
-      canvas.height = img.naturalHeight || 600;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const base64Data = canvas.toDataURL("image/jpeg");
       
-      console.log(`${LOG} Requesting photo capture via Tauri IPC...`);
-      const savedPath = await invoke<string>("save_screenshot_command", { rawData: base64Data });
-      console.log(`${LOG} Photo successfully captured and saved to: ${savedPath}`);
-      toast.success(`📸 Media Saved: ${savedPath}`);
+      const width = img.naturalWidth || 800;
+      const height = img.naturalHeight || 600;
+      
+      // Handle rotation swapping canvas dimensions
+      if (rotation % 180 !== 0) {
+        canvas.width = height;
+        canvas.height = width;
+      } else {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.drawImage(img, -width / 2, -height / 2, width, height);
+      
+      const base64Data = canvas.toDataURL("image/png");
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `ARES01_CAP_${timestamp}.png`;
+      
+      const a = document.createElement('a');
+      a.href = base64Data;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      
+      toast.success(`📸 Snapshot Saved: ${filename}`);
     } catch (err) {
       console.error(`${LOG} Failed to capture photo:`, err);
       toast.error(`⚠️ Capture Failed: ${err}`);
     }
-  }, []);
+  }, [rotation]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -2604,6 +2653,9 @@ RULES:
               rssi={rssi}
               setStreamError={setStreamError}
               setStreamSrc={setStreamSrc}
+              roverOnline={roverOnline}
+              roverIp={roverIp}
+              rotation={rotation}
             />
           </div>
         </div>
@@ -2611,6 +2663,8 @@ RULES:
           <CameraOverlay 
             onCapturePhoto={handleCapturePhoto} 
             onRecordVideo={handleRecordVideo} 
+            onRotate={handleRotate}
+            rotation={rotation}
             isRecording={isRecording} 
           />
         </div>
