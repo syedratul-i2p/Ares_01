@@ -557,6 +557,9 @@ interface CameraViewProps {
   roverOnline: boolean;
   roverIp: string;
   rotation: number;
+  streamKey: number;
+  isRebooting: boolean;
+  isStreamSevered: boolean;
 }
 
 const CameraView = React.memo(function CameraView({
@@ -567,7 +570,10 @@ const CameraView = React.memo(function CameraView({
   setStreamSrc,
   roverOnline,
   roverIp,
-  rotation
+  rotation,
+  streamKey,
+  isRebooting,
+  isStreamSevered
 }: CameraViewProps) {
   const [isStreamLoading, setIsStreamLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -599,12 +605,12 @@ const CameraView = React.memo(function CameraView({
         {roverOnline && streamSrc ? (
           <img 
             id="rover-video-stream"
-            key={streamSrc}
-            src={streamSrc} 
+            key={streamKey}
+            src={isStreamSevered || isRebooting ? "" : `${streamSrc}?t=${streamKey}`} 
             alt="ARES-01 live feed"
             crossOrigin="anonymous"
             className="w-full h-full object-cover rounded-xl pointer-events-none select-none"
-            style={{ display: streamError || !roverOnline ? 'none' : 'block' }}
+            style={{ display: streamError || !roverOnline || isStreamSevered || isRebooting ? 'none' : 'block' }}
             onLoad={() => {
               setIsStreamLoading(false);
               setStreamError(false);
@@ -618,7 +624,17 @@ const CameraView = React.memo(function CameraView({
           />
         ) : null}
 
-        {(streamError || !roverOnline || isStreamLoading) && (
+        {(isStreamSevered || isRebooting) ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-50">
+            <div className="w-16 h-16 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mb-4" />
+            <span className="text-indigo-400 font-mono text-xl font-bold tracking-[0.2em] animate-pulse">
+              ARES-01 REBOOTING...
+            </span>
+            <span className="text-white/50 font-mono text-sm tracking-widest mt-2">
+              AWAITING TELEMETRY
+            </span>
+          </div>
+        ) : (streamError || !roverOnline || isStreamLoading) && (
           <div className="absolute inset-0">
             {/* Ambient AI visual glow layers behind the grid */}
             <div 
@@ -1058,6 +1074,7 @@ export default function Dashboard() {
   // ── Camera Stream State (Moved up for hook dependency array)
   const [roverIp, setRoverIp] = useState("");
   const [streamSrc, setStreamSrc] = useState<string | null>(null);
+  const [streamKey, setStreamKey] = useState(Date.now());
   const [streamError, setStreamError] = useState(false);
   const [rotation, setRotation] = useState<number>(() => Number(localStorage.getItem('ares_cam_rotation') || 0));
 
@@ -1407,49 +1424,71 @@ export default function Dashboard() {
     await setMaxSpeed(speed);
   }, []);
 
-  const handleReboot = useCallback(async () => {
+  const [isStreamSevered, setIsStreamSevered] = useState(false);
+
+  const handleReboot = async () => {
+    if (rebooting) return;
     setRebooting(true);
-    toast.info("Soft reboot directive sent to ARES-01...");
-    
+    setIsStreamSevered(true);
+    setRoverConnectionStatus("reconnecting");
+
     try {
-      // 1. Dispatch over WebSocket
+      // Phase 1: Dispatch Reboot Packets across WS & HTTP
       if (globalWs && globalWs.readyState === WebSocket.OPEN) {
         globalWs.send(JSON.stringify({ action: "reboot" }));
+        globalWs.close();
       }
-      
-      // 2. Dispatch over HTTP (Fire-and-forget)
       if (roverIp) {
         let base = roverIp.trim();
         if (!base.startsWith("http")) base = `http://${base}`;
         base = base.endsWith("/") ? base.slice(0, -1) : base;
-        fetch(`${base}/reboot`, { method: "POST" }).catch(() => {});
+        fetch(`${base}/reboot`, { method: "POST", mode: "no-cors", signal: AbortSignal.timeout(1500) }).catch(() => {});
       }
-    } catch (err) {
-      console.warn("Reboot packet dispatched, connection severed as expected:", err);
+    } catch (e) {
+      console.warn("Reboot command fired:", e);
     }
-    
-    // 3. UI State updates & Polling
-    setRoverConnectionStatus("connecting");
-    setRoverOnline(false);
-    
-    let attempts = 0;
-    const pollInterval = setInterval(() => {
-      attempts++;
-      if (globalWs && globalWs.readyState === WebSocket.OPEN) {
-        clearInterval(pollInterval);
-        setRebooting(false);
-        toast.success("ARES-01 successfully reconnected!");
-      } else if (attempts >= 10) { // 50 seconds max
-        clearInterval(pollInterval);
-        setRebooting(false);
-        setRoverConnectionStatus("disconnected");
-        toast.error("Reboot timeout: Could not reconnect to ARES-01.");
-      }
-    }, 5000);
-    
-    // Also call firebase triggerReboot just in case
-    await triggerReboot();
-  }, [roverIp]);
+
+    // Phase 2: Smart Health-Check Polling Loop via WS Probe (bypasses CORS)
+    const POLLING_DELAY_MS = 3000;
+    const POLLING_INTERVAL_MS = 1000;
+    const MAX_ATTEMPTS = 15;
+
+    setTimeout(() => {
+      let attempts = 0;
+      const pollTimer = setInterval(() => {
+        attempts++;
+        if (!roverIp) return;
+        
+        const probeWs = new WebSocket(`ws://${roverIp.trim()}:81`);
+        
+        probeWs.onopen = () => {
+          // Hardware is back!
+          clearInterval(pollTimer);
+          probeWs.close();
+          
+          setRebooting(false);
+          setIsStreamSevered(false);
+          setStreamKey(Date.now());
+          
+          if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ares_connection_active"));
+          toast.success("ARES-01 Hardware rebooted and reconnected!");
+        };
+
+        probeWs.onerror = () => {
+          // WS connection failed, meaning server isn't up yet
+          probeWs.close();
+          if (attempts >= MAX_ATTEMPTS) {
+            clearInterval(pollTimer);
+            setRebooting(false);
+            setIsStreamSevered(false);
+            setRoverConnectionStatus("disconnected");
+            toast.error("Reboot timed out. Check hardware power.");
+          }
+        };
+        
+      }, POLLING_INTERVAL_MS);
+    }, POLLING_DELAY_MS);
+  };
 
   // ── Rover heartbeat / Firebase connection
   const [fbStatus, setFbStatus] = useState<"ready" | "not-configured">("not-configured");
@@ -2718,6 +2757,9 @@ RULES:
               roverOnline={roverOnline}
               roverIp={roverIp}
               rotation={rotation}
+              streamKey={streamKey}
+              isRebooting={rebooting}
+              isStreamSevered={isStreamSevered}
             />
           </div>
         </div>

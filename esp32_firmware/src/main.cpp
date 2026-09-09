@@ -251,7 +251,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload,
         act.toLowerCase();
         if (act == "reset" || act == "reboot") {
           webSocket.sendTXT(num, "{\"status\": \"rebooting\"}");
-          delay(500);
+          delay(150);
           ESP.restart();
         }
       }
@@ -562,7 +562,7 @@ void setup() {
   server.on("/reboot", HTTP_ANY, []() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
     server.send(200, "application/json", "{\"status\":\"rebooting\"}");
-    delay(500);
+    delay(150);
     ESP.restart();
   });
 

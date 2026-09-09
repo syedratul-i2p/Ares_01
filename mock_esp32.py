@@ -11,6 +11,8 @@ camera = cv2.VideoCapture(0)
 
 def generate_mjpeg_frames():
     while True:
+        if is_rebooting:
+            break
         success, frame = camera.read()
         if not success:
             # If webcam fails, generate an empty frame delay to avoid tight loop
@@ -23,8 +25,21 @@ def generate_mjpeg_frames():
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
+@app.route('/', methods=['GET', 'HEAD', 'OPTIONS'])
+def root_endpoint():
+    if request.method == 'OPTIONS':
+        return '', 204, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS'
+        }
+    if is_rebooting:
+        return "Service Unavailable", 503, {'Access-Control-Allow-Origin': '*'}
+    return "OK", 200, {'Access-Control-Allow-Origin': '*'}
+
 @app.route('/stream', methods=['GET'])
 def stream():
+    if is_rebooting:
+        return "Service Unavailable", 503
     return Response(
         generate_mjpeg_frames(),
         mimetype='multipart/x-mixed-replace; boundary=frame',
