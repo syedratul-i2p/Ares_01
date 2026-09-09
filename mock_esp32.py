@@ -61,6 +61,33 @@ def telemetry():
         'Access-Control-Allow-Origin': '*'
     }
 
+import os
+
+is_rebooting = False
+clients = []
+
+@app.route('/reboot', methods=['GET', 'POST', 'OPTIONS'])
+def handle_reboot():
+    if request.method == 'OPTIONS':
+        return '', 204, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, GET, OPTIONS'
+        }
+    print("[SYSTEM] ESP32 Soft Restart Command Acknowledged. Rebooting...")
+    global is_rebooting
+    is_rebooting = True
+    for client in clients:
+        client.close()
+    
+    def simulate_reboot():
+        global is_rebooting
+        time.sleep(3)
+        is_rebooting = False
+        print("[SYSTEM] ESP32 Reboot Complete. Accepting connections.")
+    
+    threading.Thread(target=simulate_reboot).start()
+    return json.dumps({"status": "REBOOTING"}), 200, {'Access-Control-Allow-Origin': '*'}
+
 def start_http_service():
     # ESP32 defaults to port 80
     app.run(host='0.0.0.0', port=80, debug=False, threaded=True)
@@ -68,8 +95,11 @@ def start_http_service():
 # ----------------- 2. WEBSOCKET TELEMETRY (PORT 81) -----------------
 class ESP32TelemetrySocket(WebSocket):
     def handleConnected(self):
+        if is_rebooting:
+            self.close()
+            return
+        clients.append(self)
         print(f"[WS] Client Connected: {self.address}")
-        # Send initial online telemetry packet to trigger frontend "ROVER ONLINE" status
         payload = json.dumps({
             "status": "ONLINE",
             "battery": 92,
@@ -79,16 +109,21 @@ class ESP32TelemetrySocket(WebSocket):
         self.sendMessage(payload)
 
     def handleMessage(self):
-        # Handle ping/pong heartbeat or incoming arm/drive commands over WS
+        if is_rebooting:
+            return
         try:
             msg = json.loads(self.data)
             print(f"[WS] Message received: {msg}")
+            if msg.get("cmd") == "reboot" or msg.get("action") == "reboot":
+                handle_reboot()
+                return
         except Exception:
             pass
-        # Echo back active status
         self.sendMessage(json.dumps({"status": "ONLINE", "battery": 92}))
 
     def handleClose(self):
+        if self in clients:
+            clients.remove(self)
         print(f"[WS] Client Disconnected: {self.address}")
 
 def start_ws_service():

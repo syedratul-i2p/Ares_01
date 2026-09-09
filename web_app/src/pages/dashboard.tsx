@@ -230,10 +230,6 @@ const Header = React.memo(function Header({
             <span className={`${getPingColorClass(ping)}`}>{ping}ms</span>
           </Badge>
         )}
-        <Badge variant="outline" className="text-[10px] h-5 gap-1 font-mono font-medium">
-          <Battery className={`w-3.5 h-3.5 ${batteryPct > 20 ? 'text-green-500' : 'text-red-500 animate-pulse'}`} />
-          <span>{batteryPct}% (3S)</span>
-        </Badge>
       </div>
       <div className="flex items-center gap-1 pointer-events-auto">
         {/* Rover Mode Segmented Control */}
@@ -1242,7 +1238,7 @@ export default function Dashboard() {
   const handleCapturePhoto = useCallback(async () => {
     try {
       const img = document.getElementById('rover-video-stream') as HTMLImageElement;
-      if (!img) {
+      if (!img || img.naturalWidth === 0) {
         toast.error("⚠️ Capture Failed: No video stream active");
         return;
       }
@@ -1251,8 +1247,8 @@ export default function Dashboard() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       
-      const width = img.naturalWidth || 800;
-      const height = img.naturalHeight || 600;
+      const width = img.naturalWidth;
+      const height = img.naturalHeight;
       
       // Handle rotation swapping canvas dimensions
       if (rotation % 180 !== 0) {
@@ -1267,22 +1263,52 @@ export default function Dashboard() {
       ctx.rotate((rotation * Math.PI) / 180);
       ctx.drawImage(img, -width / 2, -height / 2, width, height);
       
-      const base64Data = canvas.toDataURL("image/png");
-      
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `ARES01_CAP_${timestamp}.png`;
+      const filename = `ARES01_SNAP_${timestamp}.png`;
       
-      const a = document.createElement('a');
-      a.href = base64Data;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const dataUrl = canvas.toDataURL('image/png');
       
-      toast.success(`📸 Snapshot Saved: ${filename}`);
+      // Try Tauri Native File System first
+      try {
+        if ((window as any).__TAURI_INTERNALS__) {
+          await invoke('save_screenshot_command', { 
+            rawData: dataUrl,
+            filename: filename
+          });
+          toast.success(`📸 Saved to Pictures/ARES-01`);
+          return;
+        }
+      } catch (err) {
+        console.warn(`${LOG} Tauri native save failed, falling back to browser download`, err);
+      }
+      
+      // Fallback: Browser download (Anchor tag)
+      try {
+        canvas.toBlob((blob) => {
+          if (!blob) throw new Error("Blob generation failed");
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          toast.success(`📸 Saved to Downloads`);
+        }, 'image/png');
+      } catch (blobErr) {
+        console.warn(`${LOG} toBlob failed, falling back to dataURL:`, blobErr);
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success(`📸 Saved to Downloads`);
+      }
     } catch (err) {
       console.error(`${LOG} Failed to capture photo:`, err);
-      toast.error(`⚠️ Capture Failed: ${err}`);
+      toast.error(`⚠️ Capture Failed: ${err instanceof Error ? err.message : err}`);
     }
   }, [rotation]);
 
@@ -1383,11 +1409,47 @@ export default function Dashboard() {
 
   const handleReboot = useCallback(async () => {
     setRebooting(true);
+    toast.info("Soft reboot directive sent to ARES-01...");
+    
+    try {
+      // 1. Dispatch over WebSocket
+      if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+        globalWs.send(JSON.stringify({ action: "reboot" }));
+      }
+      
+      // 2. Dispatch over HTTP (Fire-and-forget)
+      if (roverIp) {
+        let base = roverIp.trim();
+        if (!base.startsWith("http")) base = `http://${base}`;
+        base = base.endsWith("/") ? base.slice(0, -1) : base;
+        fetch(`${base}/reboot`, { method: "POST" }).catch(() => {});
+      }
+    } catch (err) {
+      console.warn("Reboot packet dispatched, connection severed as expected:", err);
+    }
+    
+    // 3. UI State updates & Polling
+    setRoverConnectionStatus("connecting");
+    setRoverOnline(false);
+    
+    let attempts = 0;
+    const pollInterval = setInterval(() => {
+      attempts++;
+      if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+        clearInterval(pollInterval);
+        setRebooting(false);
+        toast.success("ARES-01 successfully reconnected!");
+      } else if (attempts >= 10) { // 50 seconds max
+        clearInterval(pollInterval);
+        setRebooting(false);
+        setRoverConnectionStatus("disconnected");
+        toast.error("Reboot timeout: Could not reconnect to ARES-01.");
+      }
+    }, 5000);
+    
+    // Also call firebase triggerReboot just in case
     await triggerReboot();
-    setTimeout(() => {
-      setRebooting(false);
-    }, 4000);
-  }, []);
+  }, [roverIp]);
 
   // ── Rover heartbeat / Firebase connection
   const [fbStatus, setFbStatus] = useState<"ready" | "not-configured">("not-configured");

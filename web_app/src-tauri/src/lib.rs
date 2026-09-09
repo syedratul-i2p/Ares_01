@@ -67,7 +67,7 @@ async fn send_arm_command(ip: String, command: String) -> Result<String, String>
 }
 
 #[tauri::command]
-async fn save_screenshot_command(raw_data: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+async fn save_screenshot_command(raw_data: String, filename: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     let path_resolver = app_handle.path();
     let picture_dir = path_resolver.picture_dir().map_err(|e| e.to_string())?;
@@ -75,8 +75,7 @@ async fn save_screenshot_command(raw_data: String, app_handle: tauri::AppHandle)
     if !ares_dir.exists() {
         std::fs::create_dir_all(&ares_dir).map_err(|e| e.to_string())?;
     }
-    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or(std::time::Duration::from_secs(0)).as_secs();
-    let file_path = ares_dir.join(format!("ARES_CAP_TEST_{}.jpg", timestamp));
+    let file_path = ares_dir.join(filename);
     
     // Check if it has data URI prefix
     let b64_data = if raw_data.starts_with("data:image") {

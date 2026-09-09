@@ -53,61 +53,58 @@ export const CameraOverlay = React.memo(function CameraOverlay({
         style={{ opacity: flash ? 0.8 : 0 }}
       />
 
-      <div className="flex items-center gap-5 px-5 py-2.5 z-30 pointer-events-auto backdrop-blur-xl bg-zinc-950/80 border border-white/10 shadow-2xl rounded-2xl">
+      <div className="flex items-center gap-3 px-4 py-2 z-30 pointer-events-auto backdrop-blur-xl bg-slate-950/75 border border-slate-700/60 shadow-2xl shadow-cyan-950/40 rounded-2xl">
         
         {/* Snapshot Button */}
         <button
           onClick={handleCapture}
           title="Capture Frame"
-          className="group relative flex items-center justify-center w-10 h-10 rounded-full border border-white/5 bg-white/5 hover:bg-cyan-500/20 hover:border-cyan-500/50 hover:scale-110 active:scale-95 transition-all duration-200 cursor-pointer shadow-[0_0_0_rgba(6,182,212,0)] hover:shadow-[0_0_15px_rgba(6,182,212,0.4)]"
+          className="group relative flex items-center justify-center w-10 h-10 rounded-full bg-slate-800/50 border border-slate-600/50 hover:bg-cyan-500/20 hover:border-cyan-400/60 hover:shadow-[0_0_12px_rgba(6,182,212,0.5)] active:scale-95 transition-all duration-200"
         >
-          <Camera className="w-[18px] h-[18px] text-cyan-400 group-active:scale-90 transition-transform duration-200" />
+          <Camera className="w-[18px] h-[18px] text-cyan-400 group-hover:text-cyan-300 transition-colors" />
         </button>
 
-        <div className="w-px h-5 bg-white/10" />
+        <div className="w-[1px] h-6 bg-slate-800" />
 
         {/* Record Video Button */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={onRecordVideo}
             title={isRecording ? "Stop Recording" : "Record Video"}
-            className={`group relative flex items-center justify-center w-10 h-10 rounded-full border transition-all duration-200 hover:scale-110 active:scale-95 cursor-pointer shadow-[0_0_0_rgba(225,29,72,0)] ${
+            className={`group relative flex items-center justify-center w-10 h-10 rounded-full border transition-all duration-300 active:scale-95 ${
               isRecording 
-                ? "bg-rose-500/20 border-rose-500/50 shadow-[0_0_20px_rgba(225,29,72,0.4)]" 
-                : "bg-white/5 border-white/5 hover:bg-rose-500/20 hover:border-rose-500/50 hover:shadow-[0_0_15px_rgba(225,29,72,0.4)]"
+                ? "bg-rose-500/20 border-rose-500 shadow-[0_0_15px_rgba(225,29,72,0.5)]" 
+                : "bg-slate-800/50 border-slate-600/50 hover:bg-rose-500/10 hover:border-rose-400/50"
             }`}
           >
             {isRecording ? (
-              <div className="w-3 h-3 bg-rose-500 rounded-sm group-active:scale-90 transition-transform duration-200" />
+              <>
+                {/* Animated Pulsing Ring */}
+                <span className="absolute inset-0 rounded-full border border-rose-500 animate-ping opacity-75"></span>
+                <div className="w-3 h-3 bg-rose-500 rounded-sm" />
+              </>
             ) : (
-              <Video className="w-[18px] h-[18px] text-rose-400 group-active:scale-90 transition-transform duration-200" />
-            )}
-            {/* Pulsing Dot */}
-            {isRecording && (
-              <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
-              </span>
+              <Video className="w-[18px] h-[18px] text-rose-400 group-hover:text-rose-300 transition-colors" />
             )}
           </button>
 
           {isRecording && (
-            <div className="font-mono text-xs font-semibold text-rose-400 min-w-[36px]">
+            <div className="font-mono text-xs font-bold text-rose-400 tracking-wider">
               {formatTime(recTime)}
             </div>
           )}
         </div>
 
-        <div className="w-px h-5 bg-white/10" />
+        <div className="w-[1px] h-6 bg-slate-800" />
 
         {/* Rotate Button */}
         <button
           onClick={onRotate}
           title="Rotate Camera"
-          className="group relative flex items-center justify-center h-10 pl-3 pr-2 rounded-full border border-white/5 bg-white/5 hover:bg-emerald-500/20 hover:border-emerald-500/50 hover:scale-110 active:scale-95 transition-all duration-200 cursor-pointer shadow-[0_0_0_rgba(16,185,129,0)] hover:shadow-[0_0_15px_rgba(16,185,129,0.4)] gap-2"
+          className="group relative flex items-center gap-2 h-10 pl-3 pr-2 rounded-full bg-slate-800/50 border border-slate-600/50 hover:bg-emerald-500/20 hover:border-emerald-400/60 hover:shadow-[0_0_12px_rgba(16,185,129,0.4)] active:scale-95 transition-all duration-200"
         >
-          <RotateCw className="w-[18px] h-[18px] text-emerald-400 group-active:rotate-90 transition-transform duration-200" />
-          <span className="text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded">
+          <RotateCw className="w-[18px] h-[18px] text-emerald-400 group-active:rotate-180 transition-transform duration-500 ease-out" />
+          <span className="text-[10px] font-mono font-bold tracking-widest bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-full border border-emerald-500/30">
             {rotation}°
           </span>
         </button>
