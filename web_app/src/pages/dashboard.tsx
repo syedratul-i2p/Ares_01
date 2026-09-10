@@ -16,6 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
+import { extractCurrentFrameBase64 } from "@/utils/frameExtractor";
+import { processAutonomousCommand } from "@/services/geminiService";
 
 const normalizeBengaliNumbers = (text: string) => {
   const bengaliToEnglish: { [key: string]: string } = {
@@ -1524,6 +1526,14 @@ export default function Dashboard() {
     await setNavigationMode(mode);
   }, [setControlMode]);
 
+  useEffect(() => {
+    if (roverMode === "AUTONOMOUS") {
+      setControlMode("ai");
+    } else {
+      setControlMode("manual");
+    }
+  }, [roverMode, setControlMode]);
+
   // Sync mission status asynchronously
   useEffect(() => {
     if (!firebaseConfigured) return;
@@ -1954,187 +1964,87 @@ export default function Dashboard() {
     }
   }, [voiceLogs]);
 
+  const [isExecuting, setIsExecuting] = useState(false);
+  const isExecutingRef = useRef(false);
+
+  const executeAutonomousDirective = async (commandText: string) => {
+    if (isExecutingRef.current) return;
+    setIsExecuting(true);
+    isExecutingRef.current = true;
+    
+    setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [AI] Initiated directive: "${commandText}"`]);
+
+    while (isExecutingRef.current) {
+      const base64Frame = extractCurrentFrameBase64();
+      if (!base64Frame) {
+         setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [ERROR] Camera frame extraction failed.`]);
+         break;
+      }
+      
+      try {
+        const result = await processAutonomousCommand(commandText, base64Frame);
+        setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [VISION] Action: ${result.action}`]);
+        
+        if (result.action === "TASK_COMPLETE") {
+           setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [AI] Task accomplished successfully.`]);
+           break;
+        }
+
+        // Kinematics Translation
+        if (result.coordinates && result.coordinates.length === 2) {
+           const [y, x] = result.coordinates; // normalized 0-1000
+           // X-axis maps to Arm Base (0-180)
+           const baseAngle = Math.max(0, Math.min(180, Math.round((1000 - x) * 180 / 1000)));
+           // Y-axis maps to Shoulder and Elbow (Depth/Height)
+           const shoulderAngle = Math.max(0, Math.min(180, Math.round((1000 - y) * 180 / 1000)));
+
+           if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+             globalWs.send(JSON.stringify({ mode: "arm", action: "arm_control", joint: "base", angle: baseAngle }));
+             await new Promise(r => setTimeout(r, 200));
+             globalWs.send(JSON.stringify({ mode: "arm", action: "arm_control", joint: "shoulder", angle: shoulderAngle }));
+             await new Promise(r => setTimeout(r, 200));
+             globalWs.send(JSON.stringify({ mode: "arm", action: "arm_control", joint: "elbow", angle: shoulderAngle })); // Approximate elbow
+             await new Promise(r => setTimeout(r, 200));
+             if (result.action === "PICK") {
+                 globalWs.send(JSON.stringify({ mode: "arm", action: "arm_control", joint: "gripper", angle: 180 })); // OPEN
+                 await new Promise(r => setTimeout(r, 500));
+             }
+           }
+        }
+        
+        if (result.drive_direction && result.drive_direction !== "STOP") {
+           if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+             globalWs.send(JSON.stringify({ mode: "manual", action: "drive", direction: result.drive_direction.toLowerCase(), speed: 120 }));
+             await new Promise(r => setTimeout(r, 500));
+             globalWs.send(JSON.stringify({ mode: "manual", action: "drive", direction: "stop", speed: 0 }));
+           }
+        }
+        
+      } catch (e) {
+        setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [ERROR] Gemini AI failure: ${e}`]);
+        break;
+      }
+      
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    
+    setIsExecuting(false);
+    isExecutingRef.current = false;
+  };
+
   const handleAiDirectiveSubmit = useCallback(async (overrideText?: string | any, source: "ai" | "voice" = "ai") => {
     const rawTextToProcess = typeof overrideText === 'string' ? overrideText : directiveInput;
-    if (typeof rawTextToProcess !== 'string' || !rawTextToProcess.trim() || isProcessing) return;
+    if (typeof rawTextToProcess !== 'string' || !rawTextToProcess.trim() || isProcessing || isExecutingRef.current) return;
 
     const textToProcess = normalizeBengaliNumbers(rawTextToProcess);
     setIsProcessing(true);
     if (!overrideText) setDirectiveInput("");
 
-    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: "numeric", minute: "numeric", second: "numeric" });
-    const pipelineTasks: string[] = [];
+    executeAutonomousDirective(textToProcess);
 
-    // 1. Log the uplink
-    pipelineTasks.push(`[${timestamp}] [UPLINK] Command packet received: "${textToProcess}"`);
-
-    const groqApiKey = import.meta.env.VITE_GROQ_API_KEY;
-    const isKeyConfigured = groqApiKey && groqApiKey !== "YOUR_GROQ_API_KEY_HERE";
-
-    if (isKeyConfigured) {
-      // ── LIVE GROQ CLOUD API CALL ──────────────────────────────────────────────
-      pipelineTasks.push(`[${timestamp}] [AI] Routing to Groq llama-3.1-8b-instant model...`);
-
-      const systemPrompt = `You are the onboard AI commander for ARES-01, a 6-wheeled robotic rover with a 5-DOF robotic arm.
-Your sole job is to analyze the operator's natural language command (which may be in Bengali or English) and output a strict JSON response representing a timed execution plan.
-
-AVAILABLE COMMANDS:
-- Locomotion: FORWARD, BACKWARD, LEFT, RIGHT, STOP
-- Arm macros: PICKUP, DROP, HOME
-
-OUTPUT FORMAT (strict JSON, no markdown):
-{
-  "plan": [
-    { "command": "FORWARD", "duration_ms": 3000 }
-  ],
-  "summary": "Mission summary in English"
-}
-
-RULES:
-1. Extract durations. 1 second = 1000 duration_ms. 1 minute = 60000.
-2. If distance is given, assume 1 meter = 3000 duration_ms.
-3. If no duration is specified, use 1000 for safety.
-4. ALWAYS append a final action with { "command": "STOP", "duration_ms": 0 } at the end of every multi-step sequence to prevent runaway.
-5. Bengali words: সামনে/এগিয়ে→FORWARD, পিছনে→BACKWARD, বামে→LEFT, ডানে→RIGHT, থামো→STOP, সেকেন্ড→seconds, মিনিট→minutes.
-6. Always output valid JSON only. No extra text before or after.`;
-
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-      try {
-        const apiUrl = `https://api.groq.com/openai/v1/chat/completions`;
-        const controller = new AbortController();
-        timeoutId = setTimeout(() => controller.abort(), 8000);
-        
-        const response = await fetch(apiUrl, {
-          method: "POST",
-          signal: controller.signal,
-          headers: { 
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${groqApiKey}`
-          },
-          body: JSON.stringify({
-            model: "llama-3.1-8b-instant",
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: textToProcess }
-            ],
-            response_format: { type: "json_object" },
-            temperature: 0.1,
-            max_tokens: 512,
-          }),
-        });
-
-        if (!response.ok) {
-          const errBody = await response.text();
-          throw new Error(`API ${response.status}: ${errBody.substring(0, 200)}`);
-        }
-
-        const data = await response.json();
-        const rawText = data?.choices?.[0]?.message?.content;
-        
-        if (!rawText) {
-          throw new Error("Empty model response – no choices returned.");
-        }
-
-        pipelineTasks.push(`[${timestamp}] [AI] Model response received. Parsing action sequence...`);
-
-        const parsed = JSON.parse(rawText);
-        const plan: { command: string; duration_ms: number }[] = parsed.plan || [];
-        const summary: string = parsed.summary || "No summary provided.";
-
-        if (plan.length === 0) {
-          pipelineTasks.push(`[${timestamp}] [AI] Model returned no actionable commands. Summary: ${summary}`);
-        } else {
-          pipelineTasks.push(`[${timestamp}] [AI] Executing ${plan.length} steps. Summary: ${summary}`);
-          
-          if (queueTimerRef.current) {
-            clearTimeout(queueTimerRef.current);
-            queueTimerRef.current = null;
-          }
-
-          const runQueue = async () => {
-            for (let i = 0; i < plan.length; i++) {
-              const step = plan[i];
-              const cmd = step.command?.toUpperCase();
-              
-              const isArm = ["PICKUP", "DROP", "HOME"].includes(cmd);
-              const isDrive = ["FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP"].includes(cmd);
-              
-              if (isDrive || isArm) {
-                const prefix = isArm ? "[ARM]" : "[NAV]";
-                const logMsg = `[${new Date().toLocaleTimeString()}] ${prefix} Executing Step ${i + 1}/${plan.length}: ${cmd} (${step.duration_ms}ms)`;
-                setAiLogs(prev => [...prev, logMsg].slice(-8));
-                setActiveQueue({ command: cmd, duration_ms: step.duration_ms, index: i + 1, total: plan.length });
-
-                if (isDrive) {
-                  setDriveDirection(cmd as DriveDirection);
-                  if (commandUrl) {
-                    try { await sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: cmd, speed: 255 }); }
-                    catch (e) { console.error(e); }
-                  }
-                  if (cmd === "STOP") setAiTaskState("idle");
-                } else if (isArm) {
-                  if (cmd === "PICKUP") {
-                    setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
-                  } else if (cmd === "DROP") {
-                    setJoints(prev => ({ ...prev, gripper: 90 }));
-                  } else if (cmd === "HOME") {
-                    setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
-                  }
-                  if (commandUrl) {
-                    try { await sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: cmd, speed: 255 }); }
-                    catch (e) { console.error(e); }
-                  }
-                }
-
-                if (step.duration_ms > 0) {
-                  await new Promise(resolve => { queueTimerRef.current = setTimeout(resolve, step.duration_ms) });
-                }
-              }
-            }
-            setActiveQueue(null);
-            setAiTaskState("idle");
-            if (commandUrl) {
-               try { await sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }); }
-               catch (e) {}
-            }
-          };
-          runQueue();
-        }
-
-        pipelineTasks.push(`[${timestamp}] [AI] Mission Summary: ${summary}`);
-        pipelineTasks.push(`[${timestamp}] [SYS] Groq-powered queue dispatched (${plan.length} step${plan.length !== 1 ? 's' : ''}).`);
-
-      } catch (err: any) {
-        if (err.name === 'AbortError') {
-          console.error("Groq API Timeout:", err);
-          pipelineTasks.push(`[${timestamp}] [AI] ⚠ Groq API timeout (8000ms exceeded).`);
-          setIsProcessing(false);
-        } else {
-          console.error("Groq API Error:", err);
-          pipelineTasks.push(`[${timestamp}] [AI] ⚠ Groq API error: ${err.message || String(err)}`);
-        }
-        pipelineTasks.push(`[${timestamp}] [SYS] Falling back to local keyword parser...`);
-
-        // ── FALLBACK: Local keyword matching ──────────────────────────────
-        executeLocalKeywordFallback(textToProcess, timestamp, pipelineTasks);
-      } finally {
-        if (timeoutId) clearTimeout(timeoutId);
-      }
-    } else {
-      // ── NO API KEY: Use local keyword matching directly ─────────────────
-      pipelineTasks.push(`[${timestamp}] [AI] Groq API key not configured. Using local NLP parser.`);
-      executeLocalKeywordFallback(textToProcess, timestamp, pipelineTasks);
-    }
-
-    // Log stream routing
-    if (source === "voice") {
-      setVoiceLogs(prev => [...prev, ...pipelineTasks]);
-    } else {
-      setAiLogs(prev => [...prev, ...pipelineTasks]);
-    }
-
-    setIsProcessing(false);
+    setTimeout(() => {
+        setIsProcessing(false);
+    }, 500);
   }, [directiveInput, isProcessing, commandUrl]);
 
   // ── Local Keyword Fallback (used when Gemini is unavailable) ─────────────
@@ -2780,7 +2690,7 @@ RULES:
         {/* 2. MODE SELECTOR TABS */}
         <div className="shrink-0 px-4 pt-4 md:pt-2.5 pb-2 bg-transparent z-10">
           <div className="relative flex overflow-x-auto scrollbar-hide flex-nowrap rounded-xl bg-muted/80 p-1 gap-1 max-w-xl mx-auto border border-border/50">
-            {CONTROL_TABS.map(tab => (
+            {CONTROL_TABS.filter(tab => roverMode === "AUTONOMOUS" ? (tab.id === "ai" || tab.id === "voice") : tab.id === "manual").map(tab => (
               <button key={tab.id} onClick={() => { setControlMode(tab.id); }}
                 className={`relative flex flex-1 min-w-[140px] sm:min-w-0 items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg z-10 transition-all duration-300 ease-out active:scale-95 select-none ${
                   controlMode === tab.id ? "text-foreground shadow-[0_0_10px_rgba(255,255,255,0.05)] scale-[1.02]" : "text-muted-foreground hover:text-foreground hover:scale-105"
@@ -2791,7 +2701,12 @@ RULES:
                     transition={{ type: "spring", stiffness: 500, damping: 38 }} />
                 )}
                 <tab.icon className="w-3.5 h-3.5 relative z-10 shrink-0" />
-                <span className="relative z-10">{tab.label}</span>
+                <span className="relative z-10 flex items-center gap-1.5">
+                  {tab.id === "ai" && isExecuting && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+                  )}
+                  {tab.label}
+                </span>
               </button>
             ))}
           </div>
@@ -2802,11 +2717,11 @@ RULES:
           <AnimatePresence mode="wait" initial={false}>
 
             {/* ── MANUAL CONTROL ── */}
-            {controlMode === "manual" && (
+            {(controlMode === "manual" && roverMode === "MANUAL") && (
               <motion.div key="manual"
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
-                className={`px-4 py-3 md:h-full md:overflow-x-hidden md:overflow-y-auto flex items-start justify-center ${roverMode === "AUTONOMOUS" ? "pointer-events-none opacity-30" : ""}`}>
+                className={`px-4 py-3 md:h-full md:overflow-x-hidden md:overflow-y-auto flex items-start justify-center`}>
                 <div className="your-main-control-container flex flex-col items-center justify-start gap-2 w-full max-w-md mx-auto py-1 px-1 mt-1">
                   {/* TOP: 5DOF Arm */}
                   <div className="arm-control-section shrink-0 w-full max-w-[360px] flex flex-col items-center justify-center">
@@ -2844,7 +2759,7 @@ RULES:
             )}
 
             {/* ── AI DIRECTIVE ── */}
-            {controlMode === "ai" && (
+            {(controlMode === "ai" && roverMode === "AUTONOMOUS") && (
               <motion.div key="ai"
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
@@ -2866,12 +2781,12 @@ RULES:
                           placeholder="e.g., 'Initiate pick up sequence'"
                           value={directiveInput}
                           onChange={e => setDirectiveInput(e.target.value)}
-                          onKeyDown={e => e.key === "Enter" && !isProcessing && handleAiDirectiveSubmit()}
+                          onKeyDown={e => e.key === "Enter" && !(isProcessing || isExecuting) && handleAiDirectiveSubmit()}
                           onClick={() => commandInputRef.current?.focus()}
-                          disabled={isProcessing}
+                          disabled={isProcessing || isExecuting}
                           className="cmd-input flex-1 h-9 rounded-lg border border-input bg-background px-4 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground/65 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                           data-testid="input-ai-cmd" />
-                        <Button onClick={handleAiDirectiveSubmit} data-testid="btn-ai-send" disabled={isProcessing || !directiveInput.trim()}
+                        <Button onClick={handleAiDirectiveSubmit} data-testid="btn-ai-send" disabled={isProcessing || isExecuting || !directiveInput.trim()}
                           className="h-9 px-4 active:scale-95 transition-transform shrink-0">
                           <Send className="w-4 h-4" />
                         </Button>
@@ -2939,7 +2854,7 @@ RULES:
               </motion.div>
             )}
 
-            {controlMode === "voice" && (
+            {(controlMode === "voice" && roverMode === "AUTONOMOUS") && (
               <motion.div key="voice"
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
@@ -2973,7 +2888,8 @@ RULES:
                         <button
                           id="voice-toggle-btn"
                           onClick={handleVoiceToggle}
-                          className={`relative z-10 w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 shadow-lg cursor-pointer ${
+                          disabled={isProcessing || isExecuting}
+                          className={`relative z-10 w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 shadow-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                             isListening 
                               ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-500/30' 
                               : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/30'
