@@ -34,31 +34,52 @@ export default function EspStudio() {
   
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
+  const isTauriEnv = () => typeof window !== "undefined" && Boolean((window as any).__TAURI_INTERNALS__);
+
   const fetchFirmware = async () => {
     try {
-      const code = await invoke<string>("read_firmware");
-      setFirmwareCode(code);
-      toast.success("Code Viewer Synced via Rust Backend!");
+      if (isTauriEnv()) {
+        const code = await invoke<string>("read_firmware");
+        setFirmwareCode(code);
+        toast.success("Code Viewer Synced via Rust Backend!");
+      } else {
+        setFirmwareCode(
+`// ============================================================================
+// ARES-01 EMBEDDED FIRMWARE (ESP32-S3 FreeRTOS Dual-Core Architecture)
+// ============================================================================
+// [BROWSER MODE ACTIVE]
+// WebSerial USB Serial Monitor & NVS Configuration are fully active in Chrome!
+// Direct firmware recompilation and flashing via esptool runs in the Desktop App.
+//
+// Hardware Pins: SDA=1, SCL=2 (Dual PCA9685 at 0x40 & 0x41)
+// WiFi Modes: AP (192.168.4.1) & STA (Auto-Reconnect)
+// Telemetry: Port 81 (WebSocket) | Stream: Port 82 (MJPEG) | API: Port 80 (HTTP)
+// ============================================================================`
+        );
+      }
     } catch (err) {
       setFirmwareCode("// Unable to load firmware source.");
-      toast.error("Could not sync code viewer.");
     }
   };
 
   useEffect(() => {
     fetchFirmware();
     
-    // Listen for background compiler logs
-    const unlistenPromise = listen<string>("build-log", (event) => {
-      setLogs((prev) => {
-        const newLogs = [...prev, event.payload];
-        if (newLogs.length > 1000) return newLogs.slice(newLogs.length - 1000);
-        return newLogs;
-      });
-    });
+    let unlistenFn: (() => void) | undefined;
+    if (isTauriEnv()) {
+      listen<string>("build-log", (event) => {
+        setLogs((prev) => {
+          const newLogs = [...prev, event.payload];
+          if (newLogs.length > 1000) return newLogs.slice(newLogs.length - 1000);
+          return newLogs;
+        });
+      }).then((fn) => {
+        unlistenFn = fn;
+      }).catch(err => console.warn("Tauri build-log listener error:", err));
+    }
 
     return () => {
-      unlistenPromise.then(unlisten => unlisten());
+      if (unlistenFn) unlistenFn();
     };
   }, []);
 
@@ -244,6 +265,18 @@ export default function EspStudio() {
     }
     
     // Pipeline Step 3: Flash Firmware via Embedded esptool Sidecar
+    if (!isTauriEnv()) {
+      setIsFlashing(false);
+      toast.dismiss();
+      toast.info("WiFi credentials injected! Direct binary flashing runs via the Desktop App.");
+      setLogs(prev => [
+        ...prev, 
+        "[SYSTEM] NVS WiFi credentials successfully configured via WebSerial!",
+        "[INFO] To compile & flash complete binary firmware images, run the ARES-01 Desktop application."
+      ]);
+      return;
+    }
+
     setIsFlashing(true);
     toast.loading("Flashing ESP32 via embedded esptool...");
     setLogs(prev => [...prev, "[SYSTEM] Initiating Embedded USB Flasher..."]);

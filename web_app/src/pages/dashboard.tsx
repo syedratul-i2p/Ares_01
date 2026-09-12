@@ -501,7 +501,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                     <input
                       type="text"
                       className="h-6 text-[10px] bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
-                      placeholder="Enter Rover IP (e.g., 192.168.1.5)"
+                      placeholder="Enter Rover IP (e.g., 192.168.4.1)"
                       value={roverIp}
                       onChange={e => setRoverIp(e.target.value)}
                       onKeyDown={e => e.key === "Enter" && handleConnect()}
@@ -522,6 +522,22 @@ const SettingsPanel = React.memo(function SettingsPanel({
                         Connect
                       </button>
                     )}
+                  </div>
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setRoverIp("192.168.4.1")}
+                      className="text-[9px] px-2 py-0.5 rounded bg-slate-200 dark:bg-white/10 hover:bg-primary/20 hover:text-primary text-slate-700 dark:text-slate-300 font-mono transition-colors cursor-pointer"
+                    >
+                      ⚡ Offline AP (192.168.4.1)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRoverIp("192.168.210.196")}
+                      className="text-[9px] px-2 py-0.5 rounded bg-slate-200 dark:bg-white/10 hover:bg-primary/20 hover:text-primary text-slate-700 dark:text-slate-300 font-mono transition-colors cursor-pointer"
+                    >
+                      🌐 Online WiFi (192.168.210.196)
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1086,16 +1102,17 @@ export default function Dashboard() {
   const { theme, setTheme } = useTheme();
 
   // ── Network / Connection State
+  const initialRoverIp = typeof window !== "undefined" ? (localStorage.getItem('ares_rover_ip') || "192.168.4.1") : "192.168.4.1";
   const [roverConnectionStatus, setRoverConnectionStatus] = useState<RoverConnectionStatus>("disconnected");
   const [ping, setPing] = useState<number | null>(null);
-  const [commandUrl, setCommandUrl] = useState("");
+  const [commandUrl, setCommandUrl] = useState(`http://${initialRoverIp}`);
   const [showSettings, setShowSettings] = useState(false);
   const [roverMode, setRoverMode] = useState<"MANUAL" | "AUTONOMOUS">("MANUAL");
 
   // ── Camera Stream State (Moved up for hook dependency array)
-  const [roverIp, setRoverIp] = useState("");
-  const [connectTrigger, setConnectTrigger] = useState(0);
-  const [streamSrc, setStreamSrc] = useState<string | null>(null);
+  const [roverIp, setRoverIp] = useState(initialRoverIp);
+  const [connectTrigger, setConnectTrigger] = useState(1);
+  const [streamSrc, setStreamSrc] = useState<string | null>(`http://${initialRoverIp}:82/stream?cb=${Date.now()}`);
   const [streamKey, setStreamKey] = useState(Date.now());
   const [streamError, setStreamError] = useState(false);
   const [rotation, setRotation] = useState<number>(() => Number(localStorage.getItem('ares_cam_rotation') || 0));
@@ -1143,8 +1160,12 @@ export default function Dashboard() {
     if (!roverIp || connectTrigger === 0) return;
     try {
       let lastPacketTime = Date.now();
+      let lastPingSent = Date.now();
       
-      const onActive = () => { lastPacketTime = Date.now(); };
+      const onActive = () => { 
+        lastPacketTime = Date.now(); 
+        setRoverOnline(true);
+      };
       window.addEventListener("ares_connection_active", onActive);
       
       const updateTelemetry = (data: any) => {
@@ -1157,7 +1178,8 @@ export default function Dashboard() {
         }));
       };
 
-      const wsUrl = `ws://${roverIp}:81/`;
+      const cleanIp = roverIp.trim().replace(/^https?:\/\//i, '').replace(/^ws:\/\//i, '').split('/')[0];
+      const wsUrl = `ws://${cleanIp}:81/`;
       console.log(`[ARES-01] Auto-init WebSocket telemetry to: ${wsUrl}`);
       const telemetryWs = new WebSocket(wsUrl);
       globalWs = telemetryWs;
@@ -1167,9 +1189,14 @@ export default function Dashboard() {
       telemetryWs.onopen = () => {
         initialConnect = true;
         lastPacketTime = Date.now();
-        toast.success("Connected to Rover (Telemetry Active)");
+        setRoverOnline(true);
+        toast.success(`Connected to Rover (${cleanIp})`);
+        lastPingSent = Date.now();
+        telemetryWs.send(JSON.stringify({ ping: true }));
+
         pingInterval = setInterval(() => {
           if (telemetryWs.readyState === WebSocket.OPEN) {
+            lastPingSent = Date.now();
             telemetryWs.send(JSON.stringify({ ping: true }));
           }
         }, 1500); // 1.5s ping keeps ESP32 responding with telemetry
@@ -1179,6 +1206,8 @@ export default function Dashboard() {
         // ANY message from the rover means it's online - set this FIRST before parsing
         setRoverOnline(true);
         lastPacketTime = Date.now();
+        const rtt = Math.max(1, Math.round(Date.now() - lastPingSent));
+        setPing(rtt);
         try {
           const data = JSON.parse(e.data);
           if (data.battery !== undefined || data.distance !== undefined) {
@@ -1192,15 +1221,41 @@ export default function Dashboard() {
         }
       };
 
+      // Fallback: If WS is disconnected or slow, HTTP poll keeps rover connection active
+      const httpPollInterval = setInterval(async () => {
+        if (!globalWs || globalWs.readyState !== WebSocket.OPEN) {
+          try {
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 1200);
+            const t0 = Date.now();
+            const res = await fetch(`http://${cleanIp}/telemetry`, { signal: controller.signal, mode: "cors" });
+            clearTimeout(tid);
+            if (res.ok) {
+              const data = await res.json();
+              setRoverOnline(true);
+              lastPacketTime = Date.now();
+              setPing(Math.max(1, Math.round(Date.now() - t0)));
+              if (data.battery !== undefined || data.distance !== undefined) {
+                updateTelemetry(data);
+              }
+            }
+          } catch (e) {
+            // Ignore background HTTP poll failure
+          }
+        }
+      }, 2500);
+
       const watchdogInterval = setInterval(() => {
         if (Date.now() - lastPacketTime > 8000) {
           setRoverOnline(false);
+          setPing(null);
         }
       }, 2000);
+
       const resetTelemetry = () => {
         if (pingInterval) clearInterval(pingInterval);
         setRoverOnline(false);
-        // Do not wipe out telemetry so the UI keeps displaying the last known values
+        setPing(null);
       };
 
       telemetryWs.onclose = (e) => {
@@ -1212,12 +1267,12 @@ export default function Dashboard() {
       };
       telemetryWs.onerror = (e) => {
         console.error("[WS] Telemetry error", e);
-        toast.error(`WebSocket Error: Could not connect to ${wsUrl}. Check if you are on the rover's WiFi!`);
         resetTelemetry();
       };
 
       return () => {
         if (pingInterval) clearInterval(pingInterval);
+        clearInterval(httpPollInterval);
         window.removeEventListener("ares_connection_active", onActive);
         clearInterval(watchdogInterval);
         globalWs = null;
@@ -2282,13 +2337,14 @@ export default function Dashboard() {
     
     setCommandUrl(newCommandUrl);
     setRoverIp(cleanIp);
+    localStorage.setItem('ares_rover_ip', cleanIp);
     
     // Bind stream instantly
     setStreamError(false);
     setStreamSrc(newStreamUrl);
     setConnectTrigger(c => c + 1);
     
-    toast.info("Connecting to Rover...");
+    toast.info(`Connecting to Rover (${cleanIp})...`);
   }, [roverIp]);
 
   const handleDisconnect = useCallback(() => {
