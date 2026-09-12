@@ -2088,18 +2088,74 @@ export default function Dashboard() {
   };
 
   // ── Local Keyword Fallback (used when Gemini is unavailable) ─────────────
-  const executeLocalKeywordFallback = useCallback((text: string, timestamp: string, pipelineTasks: string[]) => {
+  const executeLocalKeywordFallback = useCallback(async (text: string, timestamp: string, pipelineTasks: string[]) => {
     const lowerText = text.toLowerCase();
 
-    // Phase 6.1: Autonomous Red Object Mission
-    if (['red ball', 'locate', 'red object', 'pick up the red ball'].some(k => lowerText.includes(k))) {
-      pipelineTasks.push(`[${timestamp}] [SYS] Phase 6.1 Hybrid NLP Parsed. Initiating Autonomous Target Lock Sequence.`);
-      setAiTaskState("rotate_to_scan");
+    // 1. Check for time-based parameter (e.g. "৫ সেকেন্ড", "5s", "3 sec")
+    const numMatch = lowerText.match(/(\d+(?:\.\d+)?)\s*(?:সেকেন্ড|sec|s)/);
+    const durationSec = numMatch ? parseFloat(numMatch[1]) : 0;
+
+    // 2. Sequential Autonomous Macro: "সামনে গিয়ে তোল" / "forward and pick"
+    const hasDriveKeyword = ['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead'].some(k => lowerText.includes(k));
+    const hasPickKeyword = ['তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab'].some(k => lowerText.includes(k));
+
+    if (hasDriveKeyword && hasPickKeyword) {
+      const driveDuration = durationSec > 0 ? durationSec * 1000 : 2000;
+      pipelineTasks.push(`[${timestamp}] [MISSION] Phase 1: Driving forward to target (${driveDuration / 1000}s)...`);
+      setDriveDirection("FORWARD");
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "FORWARD", speed: 200 }).catch(console.error);
+      
+      await new Promise(r => setTimeout(r, driveDuration));
+      
+      pipelineTasks.push(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 2: Target reached. Braking rover.`);
+      setDriveDirection("STOP");
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(console.error);
+      
+      await new Promise(r => setTimeout(r, 400));
+      
+      pipelineTasks.push(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 3: Actuating 5-DOF Arm down to pick object.`);
+      setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(console.error);
+      
+      await new Promise(r => setTimeout(r, 1400));
+      
+      pipelineTasks.push(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Gripping payload and returning to Home pose.`);
+      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
+      
+      toast.success("Autonomous Pick Mission Completed!");
       return;
     }
 
-    // NAV
-    if (['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead'].some(k => lowerText.includes(k))) {
+    // 3. Timed Movement: "৫ সেকেন্ড সামনে যাও"
+    if (durationSec > 0) {
+      let dir: DriveDirection = "FORWARD";
+      let dirLabel = "FORWARD";
+      if (['পিছনে', 'পেছনে', 'পিছা', 'back', 'rev'].some(k => lowerText.includes(k))) {
+        dir = "BACKWARD";
+        dirLabel = "BACKWARD";
+      } else if (['বামে', 'বাম', 'left'].some(k => lowerText.includes(k))) {
+        dir = "LEFT";
+        dirLabel = "LEFT";
+      } else if (['ডানে', 'ডান', 'right'].some(k => lowerText.includes(k))) {
+        dir = "RIGHT";
+        dirLabel = "RIGHT";
+      }
+
+      pipelineTasks.push(`[${timestamp}] [NAV] Moving ${dirLabel} for ${durationSec} seconds...`);
+      setDriveDirection(dir);
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: dir, speed: 255 }).catch(console.error);
+
+      setTimeout(() => {
+        setDriveDirection("STOP");
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(console.error);
+        toast.info(`Completed ${durationSec}s movement.`);
+      }, durationSec * 1000);
+      return;
+    }
+
+    // 4. Standard Continuous Driving (Forward, Backward, Left, Right, Stop)
+    if (hasDriveKeyword) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: FORWARD.`);
       setDriveDirection("FORWARD");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "FORWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
@@ -2122,21 +2178,16 @@ export default function Dashboard() {
       setAiTaskState("idle");
     }
 
-    // VISION
-    if (['বল', 'টার্গেট', 'অবজেক্ট', 'ball', 'target', 'object'].some(k => lowerText.includes(k))) {
-      pipelineTasks.push(`[${timestamp}] [VISION] Live camera link established. YOLO object tracking: TARGET_LOCK_ACTIVE.`);
-    }
-
-    // ARM
-    if (['তোল', 'তুল', 'উঠাও', 'ওঠাও', 'নাও', 'ধর', 'pick', 'grab'].some(k => lowerText.includes(k))) {
-      pipelineTasks.push(`[${timestamp}] [ARM] Inverse kinematics matrix resolved. Actuating manipulator: PICKUP.`);
+    // 5. 5-DOF Arm Control
+    if (hasPickKeyword) {
+      pipelineTasks.push(`[${timestamp}] [ARM] Inverse kinematics resolved. Actuating manipulator: PICKUP.`);
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'drop', 'releas'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
       setJoints(prev => ({ ...prev, gripper: 90 }));
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'home', 'reset'].some(k => lowerText.includes(k))) {
+    } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
@@ -2160,7 +2211,7 @@ export default function Dashboard() {
 
     // FAST-PATH: Local Keyword Matching (Instant response for voice/text driving)
     const lowerText = textToProcess.toLowerCase();
-    const isNavCommand = ['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'পিছনে', 'পেছনে', 'পিছা', 'back', 'rev', 'বামে', 'বাম', 'left', 'ডানে', 'ডান', 'right', 'থামো', 'দাঁড়াও', 'stop', 'halt', 'break', 'তোল', 'তুল', 'উঠাও', 'ওঠাও', 'নাও', 'ধর', 'pick', 'grab', 'ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'drop', 'releas', 'হোম', 'জায়গা', 'সোজা', 'রিসেট', 'home', 'reset'].some(k => lowerText.includes(k));
+    const isNavCommand = ['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'পিছনে', 'পেছনে', 'পিছা', 'back', 'rev', 'বামে', 'বাম', 'left', 'ডানে', 'ডান', 'right', 'থামো', 'দাঁড়াও', 'stop', 'halt', 'break', 'তোল', 'তুল', 'উঠাও', 'ওঠাও', 'নাও', 'ধর', 'pick', 'grab', 'ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'drop', 'releas', 'হোম', 'জায়গা', 'সোজা', 'রিসেট', 'home', 'reset', 'sec', 'সেকেন্ড'].some(k => lowerText.includes(k));
 
     if (isNavCommand) {
         // Run instantly
