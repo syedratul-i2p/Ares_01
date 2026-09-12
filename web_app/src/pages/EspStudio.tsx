@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 
 // Polyfill types for WebSerial
 declare global {
@@ -37,9 +38,10 @@ export default function EspStudio() {
     try {
       const code = await invoke<string>("read_firmware");
       setFirmwareCode(code);
-      toast.success("Code Viewer Synced!");
-    } catch (e) {
-      toast.error("Failed to read firmware: " + e);
+      toast.success("Code Viewer Synced via Rust Backend!");
+    } catch (err) {
+      setFirmwareCode("// Unable to load firmware source.");
+      toast.error("Could not sync code viewer.");
     }
   };
 
@@ -70,6 +72,9 @@ export default function EspStudio() {
     scrollToBottom();
   }, [logs, autoScroll]);
 
+  const keepReading = useRef(false);
+  const streamClosed = useRef<Promise<void> | null>(null);
+
   const connectSerial = async () => {
     try {
       if (!navigator.serial) {
@@ -83,30 +88,43 @@ export default function EspStudio() {
       setConnected(true);
       toast.success("Connected to ESP32 on USB Serial at 115200 baud.");
       
+      // Auto-Reset ESP32 (DTR/RTS Toggle) to catch boot logs natively
+      try {
+        await selectedPort.setSignals({ dataTerminalReady: false, requestToSend: true });
+        await new Promise(r => setTimeout(r, 100));
+        await selectedPort.setSignals({ dataTerminalReady: false, requestToSend: false });
+      } catch (err) {
+        console.warn("Could not set DTR/RTS signals for auto-reset", err);
+      }
+      
       const textDecoder = new TextDecoderStream();
-      const readableStreamClosed = selectedPort.readable.pipeTo(textDecoder.writable);
-      const reader = textDecoder.readable.getReader();
-      setReader(reader);
+      streamClosed.current = selectedPort.readable.pipeTo(textDecoder.writable);
+      const currentReader = textDecoder.readable.getReader();
+      setReader(currentReader);
+      keepReading.current = true;
 
       let buffer = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) {
-          break;
-        }
-        buffer += value;
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        
-        if (lines.length > 0) {
-          setLogs(prev => {
-            const newLogs = [...prev, ...lines];
-            // Keep last 1000 lines max
-            if (newLogs.length > 1000) return newLogs.slice(newLogs.length - 1000);
-            return newLogs;
-          });
+      while (keepReading.current) {
+        try {
+          const { value, done } = await currentReader.read();
+          if (done) break;
+          buffer += value;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          
+          if (lines.length > 0) {
+            setLogs(prev => {
+              const newLogs = [...prev, ...lines];
+              if (newLogs.length > 1000) return newLogs.slice(newLogs.length - 1000);
+              return newLogs;
+            });
+          }
+        } catch (error) {
+           break;
         }
       }
+      
+      currentReader.releaseLock();
     } catch (err: any) {
       console.error(err);
       if (err.name !== 'NotFoundError') {
@@ -117,12 +135,40 @@ export default function EspStudio() {
     }
   };
 
+  const softResetEsp32 = async () => {
+    if (connected && port) {
+      try {
+        await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+        await new Promise(r => setTimeout(r, 100));
+        await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+        toast.success("Hardware Reset triggered via DTR/RTS.");
+      } catch (e) {
+        console.warn("DTR/RTS failed, falling back to software reboot command.");
+        try {
+          // If we have an active pipe, getting the writer directly will fail
+          // But WebSerial usually allows writer creation while reading if not piped, or we can just send it via the stream.
+          const writer = port.writable.getWriter();
+          const data = new TextEncoder().encode("$REBOOT\n");
+          await writer.write(data);
+          writer.releaseLock();
+          toast.success("Software reboot command sent.");
+        } catch(err) {
+          toast.error("Failed to send soft reset command.");
+        }
+      }
+    }
+  };
+
   const disconnectSerial = async () => {
+    keepReading.current = false;
     if (reader) {
       try {
         await reader.cancel();
       } catch (e) {}
       setReader(null);
+    }
+    if (streamClosed.current) {
+       try { await streamClosed.current; } catch (e) {}
     }
     if (port) {
       try {
@@ -151,37 +197,62 @@ export default function EspStudio() {
   };
 
   const handleFlashConfig = async () => {
-    if (!ssid || !password) {
-      toast.error("Please provide both SSID and Password.");
-      return;
-    }
-    
-    // Mode B: Live Serial Injection (Zero-Downtime)
-    if (connected && port) {
+    // Pipeline Step 1: Inject WiFi config to NVS if provided
+    let activePort = port;
+    if (!activePort && ssid && password) {
       try {
-        const textEncoder = new TextEncoderStream();
-        const writableStreamClosed = textEncoder.readable.pipeTo(port.writable);
-        const writer = textEncoder.writable.getWriter();
-        await writer.write(`$WIFI:${ssid}:${password}\n`);
-        writer.releaseLock();
-        toast.success("WiFi config dispatched over Serial (Mode B)!");
-        setLogs(prev => [...prev, "[SYSTEM] Dispatching runtime WiFi config via Mode B..."]);
-        return; // Success, bypass Mode A Compiler
+        activePort = await navigator.serial.requestPort();
+        await activePort.open({ baudRate: 115200 });
+        setPort(activePort);
+        setConnected(true);
       } catch (e) {
-        toast.error("Failed Mode B dispatch. Falling back to Mode A.");
-        setLogs(prev => [...prev, "[SYSTEM] Mode B dispatch failed. Initiating Mode A Background Compiler..."]);
+        toast.error("You must select the COM port to inject WiFi config!");
+        return;
+      }
+    }
+
+    if (activePort && ssid && password) {
+      try {
+        const writer = activePort.writable?.getWriter();
+        if (writer) {
+          const encoder = new TextEncoder();
+          await writer.write(encoder.encode(`$WIFI:${ssid}:${password}\n`));
+          writer.releaseLock();
+          toast.success("WiFi credentials injected to NVS.");
+          setLogs(prev => [...prev, "[SYSTEM] Config injected via Serial. Awaiting NVS commit..."]);
+          // Wait briefly for ESP32 to save to NVS before we close port and flash
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+      } catch (e) {
+        toast.error("Failed to inject WiFi config.");
+        setLogs(prev => [...prev, "[SYSTEM] Serial config injection failed.", String(e)]);
       }
     }
     
+    // Pipeline Step 2: Disconnect WebSerial so esptool can claim the COM port
+    if (activePort) {
+      setLogs(prev => [...prev, "[SYSTEM] Disconnecting WebSerial to release COM port for esptool..."]);
+      try {
+        if (streamClosed.current && activePort.readable) {
+          activePort.readable.cancel().catch(() => {});
+          await streamClosed.current.catch(() => {});
+        }
+        await activePort.close();
+      } catch (e) {}
+      setPort(null);
+      setConnected(false);
+    }
+    
+    // Pipeline Step 3: Flash Firmware via Embedded esptool Sidecar
     setIsFlashing(true);
-    toast.loading("Compiling & Flashing ESP32 via PlatformIO...");
-    setLogs(prev => [...prev, "[SYSTEM] Initiating Mode A Background Build Pipeline..."]);
+    toast.loading("Flashing ESP32 via embedded esptool...");
+    setLogs(prev => [...prev, "[SYSTEM] Initiating Embedded USB Flasher..."]);
     
     try {
       const result = await invoke<string>("flash_firmware", { ssid, pass: password });
       toast.dismiss();
       toast.success(result || "ESP32 Flashed Successfully!");
-      fetchFirmware(); // Sync code viewer with modified source
+      setLogs(prev => [...prev, "[SYSTEM] Flash successful! Rover will now reboot."]);
     } catch (e: any) {
       toast.dismiss();
       toast.error("Flashing failed! Check logs.");
@@ -227,13 +298,13 @@ export default function EspStudio() {
             </h2>
             <div className="grid grid-cols-2 gap-3 mb-3">
               <Input 
-                placeholder="WiFi SSID" 
+                placeholder="WiFi SSID (Optional)" 
                 value={ssid} 
                 onChange={e => setSsid(e.target.value)}
                 className="bg-black/20 border-white/10 text-white placeholder:text-white/30 h-9 text-sm"
               />
               <Input 
-                placeholder="WiFi Password" 
+                placeholder="WiFi Password (Optional)" 
                 type="password"
                 value={password} 
                 onChange={e => setPassword(e.target.value)}
@@ -245,7 +316,7 @@ export default function EspStudio() {
               className="w-full bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.3)] h-9 text-sm"
             >
               <Save className="w-3.5 h-3.5 mr-2" />
-              Flash Network Config to ESP32
+              Flash Code & Network Config via USB
             </Button>
           </div>
 
@@ -313,13 +384,22 @@ export default function EspStudio() {
                 <Trash2 className="w-3.5 h-3.5" />
               </Button>
               {connected ? (
-                <Button 
-                  size="sm" 
-                  className="h-7 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30"
-                  onClick={disconnectSerial}
-                >
-                  <Square className="w-3 h-3 mr-1.5" /> Stop
-                </Button>
+                <>
+                  <Button 
+                    size="sm" 
+                    className="h-7 text-xs bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 border border-amber-500/30 mr-2"
+                    onClick={softResetEsp32}
+                  >
+                    Soft Reset
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    className="h-7 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30"
+                    onClick={disconnectSerial}
+                  >
+                    <Square className="w-3 h-3 mr-1.5" /> Stop
+                  </Button>
+                </>
               ) : (
                 <Button 
                   size="sm" 
@@ -343,7 +423,7 @@ export default function EspStudio() {
             )}
             
             {logs.map((line, index) => (
-              <div key={index} className="break-all whitespace-pre-wrap mb-1 hover:bg-white/[0.02]">
+              <div key={index} className="break-words whitespace-pre-wrap mb-1 hover:bg-white/[0.02]">
                 {formatLogLine(line)}
               </div>
             ))}

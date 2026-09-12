@@ -9,6 +9,7 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFi.h>
+#include <Update.h>
 
 // Function Prototypes
 void executeHardwareCommand(String mode, String action, String direction,
@@ -54,11 +55,12 @@ static const char *TAG_HTTP = "HTTP";
 // NETWORK CONFIGURATION
 const char *ap_ssid = "ARES_01_OFFLINE";
 const char *ap_password = "Admin123";
-const char *sta_ssid = "N3M0_0x70";
-const char *sta_password = "Ratul_i2p@07";
+char sta_ssid[32] = "ARES_SSID_PLACEHOLDER__________";
+char sta_password[64] = "ARES_PASS_PLACEHOLDER__________________________________________";
 
 WebServer server(80);
 WebSocketsServer webSocket(81);
+WebServer streamServer(82);
 Preferences preferences;
 unsigned long lastTelemetryTime = 0;
 
@@ -162,16 +164,18 @@ void handleCommand() {
 
 void stream_handler() {
   if (camera_fault) {
-    server.send(503, "text/plain", "Camera Hardware Fault");
+    streamServer.send(503, "text/plain", "Camera Hardware Fault");
     return;
   }
 
-  WiFiClient client = server.client();
-  if (!client.connected()) return;
+  WiFiClient client = streamServer.client();
+  if (!client.connected())
+    return;
   client.setNoDelay(true);
 
-  server.sendContent("HTTP/1.1 200 OK\r\n"
-                     "Content-Type: multipart/x-mixed-replace; boundary=123456789000000000000987654321\r\n"
+  streamServer.sendContent("HTTP/1.1 200 OK\r\n"
+                     "Content-Type: multipart/x-mixed-replace; "
+                     "boundary=123456789000000000000987654321\r\n"
                      "Access-Control-Allow-Origin: *\r\n"
                      "Cache-Control: no-cache, private\r\n\r\n");
 
@@ -186,25 +190,38 @@ void stream_handler() {
     size_t hlen = snprintf(part_buf, 128, _STREAM_PART, fb->len);
     client.write((const uint8_t *)_STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
     client.write((const uint8_t *)part_buf, hlen);
-    client.write(fb->buf, fb->len);
+    
+    // Chunk the frame write to prevent LwIP lock starvation on Core 0
+    const uint8_t *buf_ptr = fb->buf;
+    size_t remaining = fb->len;
+    while (remaining > 0 && client.connected()) {
+      size_t to_write = (remaining > 2048) ? 2048 : remaining;
+      size_t written = client.write(buf_ptr, to_write);
+      if (written == 0) {
+        break; // Network dropped or socket timed out
+      }
+      buf_ptr += written;
+      remaining -= written;
+      vTaskDelay(pdMS_TO_TICKS(1)); // Yield to allow Core 0 networking
+    }
+    
+    if (remaining > 0) {
+      esp_camera_fb_return(fb);
+      break; // Abort outer loop to close socket
+    }
+    
     esp_camera_fb_return(fb);
-
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(40));
   }
+  client.stop();
 }
 
 // mjpegTask removed, streaming handled inline in stream_handler
 
 void handleCapture() {
   if (camera_fault) {
-    server.send(503, "text/plain", "Camera Hardware Fault");
+    server.send(503, "text/plain", "Camera Fault");
     return;
-  }
-
-  // DMA Buffer Flush: discard the stale frame
-  camera_fb_t *fb_drop = esp_camera_fb_get();
-  if (fb_drop) {
-    esp_camera_fb_return(fb_drop);
   }
 
   camera_fb_t *fb = esp_camera_fb_get();
@@ -215,13 +232,14 @@ void handleCapture() {
     return;
   }
 
+  server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   server.sendHeader("Pragma", "no-cache");
   server.sendHeader("Expires", "0");
   server.sendHeader("Content-Type", "image/jpeg");
   server.setContentLength(fb->len);
   server.send(200, "image/jpeg", "");
-  server.sendContent((const char *)fb->buf, fb->len);
+  server.client().write((const uint8_t *)fb->buf, fb->len);
 
   esp_camera_fb_return(fb);
   ESP_LOGI(TAG_HTTP, "Single frame captured and sent.");
@@ -243,7 +261,8 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload,
     DeserializationError error = deserializeJson(doc, payload);
     if (!error) {
       if (doc.containsKey("ping") && doc["ping"] == true) {
-        webSocket.sendTXT(num, "{\"pong\": true, \"status\": \"online\", \"distance\": 999, \"battery\": 100}");
+        webSocket.sendTXT(num, "{\"pong\": true, \"status\": \"online\", "
+                               "\"distance\": 999, \"battery\": 100}");
         break;
       }
       if (doc.containsKey("action")) {
@@ -321,13 +340,13 @@ void streamTask(void *pvParameters) {
   config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 10000000;
+  config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
   if (psramFound()) {
     ESP_LOGI(TAG_CAM, "PSRAM Found. Initializing stable buffers.");
-    config.frame_size = FRAMESIZE_UXGA;
-    config.jpeg_quality = 14;
+    config.frame_size = FRAMESIZE_VGA;
+    config.jpeg_quality = 12;
     config.fb_count = 2;
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_LATEST;
@@ -389,11 +408,11 @@ void streamTask(void *pvParameters) {
 
   for (;;) {
     if (camera_fault) {
-      server.handleClient();
+      streamServer.handleClient();
       vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
-    server.handleClient();
+    streamServer.handleClient();
     vTaskDelay(pdMS_TO_TICKS(15));
   }
 }
@@ -403,7 +422,8 @@ void controlTask(void *pvParameters) {
 
     static unsigned long lastSlowHeartbeat = 0;
     if (millis() - lastSlowHeartbeat > 2000) {
-      webSocket.broadcastTXT("{\"status\": \"online\", \"distance\": 999, \"battery\": 100}");
+      webSocket.broadcastTXT(
+          "{\"status\": \"online\", \"distance\": 999, \"battery\": 100}");
       lastSlowHeartbeat = millis();
     }
 
@@ -458,6 +478,7 @@ void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Disable Brownout detector
   delay(2000);
   Serial.begin(115200);
+  Serial.setTimeout(10); // CRITICAL: Prevent readStringUntil from blocking Core 0!
 
   // Initialize Custom Hardware Controller (I2C, PWM, Sensors)
   Hardware.begin();
@@ -482,15 +503,12 @@ void setup() {
 
   WiFi.setSleep(false);
   delay(500);
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP(ap_ssid, ap_password, 6, 0, 4);
-  ESP_LOGI(TAG_WIFI, "AP Live on Channel 6. IP: %s",
-           WiFi.softAPIP().toString().c_str());
 
   preferences.begin("ares", false);
   String active_ssid = preferences.getString("ssid", sta_ssid);
   String active_pass = preferences.getString("pass", sta_password);
 
+  WiFi.mode(WIFI_STA);
   ESP_LOGI(TAG_WIFI, "Attempting STA connection to %s", active_ssid.c_str());
   WiFi.begin(active_ssid.c_str(), active_pass.c_str());
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
@@ -501,6 +519,27 @@ void setup() {
       staConnected = true;
       break;
     }
+    
+    // Check for Serial injection during setup
+    if (Serial.available()) {
+      String line = Serial.readStringUntil('\n');
+      line.trim();
+      if (line.startsWith("$WIFI:")) {
+        int firstColon = line.indexOf(':');
+        int secondColon = line.indexOf(':', firstColon + 1);
+        if (firstColon > 0 && secondColon > 0) {
+          String new_ssid = line.substring(firstColon + 1, secondColon);
+          String new_pass = line.substring(secondColon + 1);
+          preferences.putString("ssid", new_ssid);
+          preferences.putString("pass", new_pass);
+          Serial.println("[SYSTEM] New WiFi Config Received via Serial during setup! Reconnecting...");
+          WiFi.disconnect(true);
+          WiFi.begin(new_ssid.c_str(), new_pass.c_str());
+          startAttemptTime = millis(); // Reset timeout to wait for new WiFi
+        }
+      }
+    }
+    
     delay(500);
   }
 
@@ -509,10 +548,11 @@ void setup() {
              WiFi.localIP().toString().c_str());
   } else {
     ESP_LOGW(TAG_WIFI,
-             "STA Connection Timeout. Disabling STA to preserve AP stability.");
+             "STA Connection Timeout. Disabling STA and enabling AP.");
     WiFi.disconnect(true);
     WiFi.mode(WIFI_AP);
-    ESP_LOGI(TAG_WIFI, "Running strictly in Offline AP Mode.");
+    WiFi.softAP(ap_ssid, ap_password, 6, 0, 4);
+    ESP_LOGI(TAG_WIFI, "Running strictly in Offline AP Mode. IP: %s", WiFi.softAPIP().toString().c_str());
   }
 
   delay(1000);
@@ -530,7 +570,19 @@ void setup() {
     server.send(204);
   });
 
-  server.on("/stream", HTTP_GET, stream_handler);
+  streamServer.enableCORS(true);
+  streamServer.on("/stream", HTTP_GET, stream_handler);
+  streamServer.onNotFound([]() {
+    if (streamServer.method() == HTTP_OPTIONS) {
+      streamServer.sendHeader("Access-Control-Allow-Origin", "*");
+      streamServer.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+      streamServer.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+      streamServer.send(204);
+    } else {
+      streamServer.send(404, "text/plain", "Not Found");
+    }
+  });
+
   server.on("/capture", HTTP_GET, handleCapture);
 
   server.on("/telemetry", HTTP_GET, []() {
@@ -552,13 +604,47 @@ void setup() {
     }
   });
 
+  server.on("/update", HTTP_OPTIONS, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    server.send(204);
+  });
+
+  server.on("/update", HTTP_POST, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+    delay(1000);
+    ESP.restart();
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.printf("OTA Update Start: %s\n", upload.filename.c_str());
+      // For ESP32-S3 we update the active app partition
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) {
+        Serial.printf("OTA Update Success: %uB\n", upload.totalSize);
+      } else {
+        Update.printError(Serial);
+      }
+    }
+  });
+
   server.on("/reset", HTTP_ANY, []() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
     server.send(200, "application/json", "{\"status\":\"rebooting\"}");
     delay(500);
     ESP.restart();
   });
-  
+
   server.on("/reboot", HTTP_ANY, []() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
     server.send(200, "application/json", "{\"status\":\"rebooting\"}");
@@ -567,30 +653,26 @@ void setup() {
   });
 
   server.begin();
+  streamServer.begin();
   webSocket.begin();
   webSocket.enableHeartbeat(15000, 4000, 3);
   webSocket.onEvent(webSocketEvent);
-  ESP_LOGI(TAG_SYS, "Monolithic Web Server and WebSocket Server Started.");
+  ESP_LOGI(TAG_SYS, "Web Servers and WebSocket Server Started.");
 
   xTaskCreatePinnedToCore(
       [](void *pvParameters) {
-          for (;;) {
-              webSocket.loop();
-              vTaskDelay(pdMS_TO_TICKS(15));
-          }
+        for (;;) {
+          webSocket.loop();
+          server.handleClient();
+          vTaskDelay(pdMS_TO_TICKS(15));
+        }
       },
-      "WS_Loop_Task",
-      4096,
-      NULL,
-      2,
-      NULL,
-      1
-  );
+      "API_Task", 4096, NULL, 1, NULL, 1); // MOVE TO CORE 1!
 
-  xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 2,
+  xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 1,
                           &streamTaskHandle, 1);
-  xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 2,
-                          &controlTaskHandle, 0);
+  xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 1,
+                          &controlTaskHandle, 1); // MOVE TO CORE 1!
   ESP_LOGI(TAG_SYS, "FreeRTOS Dual-Core Architecture initialized!");
 }
 

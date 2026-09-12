@@ -81,6 +81,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-fs": "^2.5.2",
     "firebase": "^12.13.0"
   }
 }

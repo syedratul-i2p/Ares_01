@@ -1,10 +1,7 @@
-# Custom ARES-01 Ground Station exclusions
+﻿# Custom ARES-01 Ground Station exclusions
 .env
 
-# ==============================================================================
-# Flutter App Exclusions (D:/ARES-01/flutter_app)
-# ==============================================================================
-# Miscellaneous
+# Flutter App Exclusions
 *.class
 *.log
 *.pyc
@@ -15,17 +12,11 @@
 .history
 .svn/
 migrate_working_dir/
-
-# IntelliJ related
 *.iml
 *.ipr
 *.iws
 .idea/
-
-# The .vscode folder contains bare-minimum workspace folders
 .vscode/
-
-# Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
@@ -36,19 +27,11 @@ migrate_working_dir/
 /build/
 /flutter_app/build/
 pubspec.lock
-
-# Web related
 flutter_app/lib/generated_plugin_registrant.dart
-
-# Symbolication related
 app.*.symbols
 flutter_app/app.*.symbols
-
-# Obfuscation related
 app.*.map.json
 flutter_app/app.*.map.json
-
-# Android related
 **/android/**/gradle-wrapper.jar
 **/android/.gradle
 **/android/captures/
@@ -56,8 +39,6 @@ flutter_app/app.*.map.json
 **/android/gradlew.bat
 **/android/local.properties
 **/android/**/GeneratedPluginRegistrant.java
-
-# iOS/macOS related
 **/ios/**/*.mode1v3
 **/ios/**/*.mode2v3
 **/ios/**/*.moved-aside
@@ -84,17 +65,12 @@ flutter_app/app.*.map.json
 **/ios/Flutter/flutter_export_environment.sh
 **/ios/ServiceDefinitions.json
 **/ios/Runner/GeneratedPluginRegistrant.*
-
-# Exceptions to above rules
 !**/ios/**/default.pbxuser
 !**/ios/**/default.mode1v3
 !**/ios/**/default.mode2v3
 !**/ios/**/default.perspectivev3
 
-# ==============================================================================
 # Web App Exclusions (D:/ARES-01/web_app)
-# ==============================================================================
-# Logs
 logs
 *.log
 npm-debug.log*
@@ -102,14 +78,11 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-
 web_app/node_modules/
 web_app/dist/
 web_app/dist-ssr/
 web_app/*.local
 web_app/.vite-temp/
-
-# Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -119,5 +92,16 @@ web_app/.vite-temp/
 *.njsproj
 *.sln
 *.sw?
-
 node_modules/
+.pnpm-store/
+dist/
+build/
+web_app/src-tauri/target/
+web_app/src-tauri/bin/
+web_app/src-tauri/gen/android/.gradle/
+web_app/src-tauri/gen/android/app/build/
+web_app/src-tauri/gen/android/.idea/
+.env
+.DS_Store
+*.log
+esp32_firmware/.pio/

@@ -127,14 +127,22 @@ const sendCommandViaHttp = async (ip: string, payload: any) => {
     const base = url.endsWith("/") ? url.slice(0, -1) : url;
     const endpoint = base.endsWith("/command") ? base : `${base}/command`;
     
-    await fetch(endpoint, {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(endpoint, {
       method: "POST",
-      // Using text/plain avoids the CORS OPTIONS preflight request entirely
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
+    
+    if (response.ok && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("ares_connection_active"));
+    }
   } catch (err) {
     console.error("HTTP Command Error:", err);
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ares_connection_timeout"));
     throw err;
   }
 };
@@ -580,6 +588,7 @@ const CameraView = React.memo(function CameraView({
   const [isStreamLoading, setIsStreamLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const [aspectScale, setAspectScale] = useState(1.35);
+  const retryCountRef = useRef(0);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -608,19 +617,29 @@ const CameraView = React.memo(function CameraView({
           <img 
             id="rover-video-stream"
             key={streamKey}
-            src={isStreamSevered || isRebooting ? "" : `${streamSrc}?t=${streamKey}`} 
+            src={isStreamSevered || isRebooting ? "" : `${streamSrc}&t=${streamKey}`} 
             alt="ARES-01 live feed"
-            crossOrigin="anonymous"
             className="w-full h-full object-cover rounded-xl pointer-events-none select-none"
             style={{ display: streamError || !roverOnline || isStreamSevered || isRebooting ? 'none' : 'block' }}
             onLoad={() => {
+              retryCountRef.current = 0;
               setIsStreamLoading(false);
               setStreamError(false);
             }}
             onLoadStart={() => console.log(`[ARES-01] Camera stream loading from ${streamSrc}`)}
             onError={(e) => {
-              setStreamError(true);
-              setIsStreamLoading(false);
+              if (retryCountRef.current < 5) {
+                retryCountRef.current += 1;
+                console.log(`[ARES-01] Camera dropped. Auto-retrying (${retryCountRef.current}/5)...`);
+                setTimeout(() => {
+                  if (streamSrc) {
+                    setStreamSrc(`${streamSrc.split('?')[0]}?cb=${Date.now()}`);
+                  }
+                }, 1000);
+              } else {
+                setStreamError(true);
+                setIsStreamLoading(false);
+              }
             }}
             data-testid="camera-feed"
           />
@@ -1075,6 +1094,7 @@ export default function Dashboard() {
 
   // ── Camera Stream State (Moved up for hook dependency array)
   const [roverIp, setRoverIp] = useState("");
+  const [connectTrigger, setConnectTrigger] = useState(0);
   const [streamSrc, setStreamSrc] = useState<string | null>(null);
   const [streamKey, setStreamKey] = useState(Date.now());
   const [streamError, setStreamError] = useState(false);
@@ -1120,15 +1140,8 @@ export default function Dashboard() {
 
   // Connect directly to ESP32-S3 Telemetry via WebSocket and HTTP Fallback
   useEffect(() => {
-    if (!streamSrc) return;
+    if (!roverIp || connectTrigger === 0) return;
     try {
-      const ipMatch = streamSrc.match(/(?:https?:\/\/)?([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/);
-      const ip = ipMatch ? ipMatch[1] : null;
-      if (!ip) {
-        console.warn("[ARES-01] Could not extract raw IP for Telemetry from:", streamSrc);
-        return;
-      }
-      
       let lastPacketTime = Date.now();
       
       const onActive = () => { lastPacketTime = Date.now(); };
@@ -1138,61 +1151,83 @@ export default function Dashboard() {
         setTelemetry(prev => ({
           ...prev,
           rssi: data.rssi ?? prev.rssi,
-          heap: data.heap ?? prev.heap
+          heap: data.heap ?? prev.heap,
+          battery: data.battery ?? prev.battery,
+          distance: data.distance ?? prev.distance
         }));
       };
 
-      const wsUrl = `ws://${ip}:81/`;
+      const wsUrl = `ws://${roverIp}:81/`;
       console.log(`[ARES-01] Auto-init WebSocket telemetry to: ${wsUrl}`);
       const telemetryWs = new WebSocket(wsUrl);
       globalWs = telemetryWs;
       
+      let initialConnect = false;
+      let pingInterval: NodeJS.Timeout;
+      telemetryWs.onopen = () => {
+        initialConnect = true;
+        lastPacketTime = Date.now();
+        toast.success("Connected to Rover (Telemetry Active)");
+        pingInterval = setInterval(() => {
+          if (telemetryWs.readyState === WebSocket.OPEN) {
+            telemetryWs.send(JSON.stringify({ ping: true }));
+          }
+        }, 1500); // 1.5s ping keeps ESP32 responding with telemetry
+      };
+      
       telemetryWs.onmessage = (e) => {
+        // ANY message from the rover means it's online - set this FIRST before parsing
+        setRoverOnline(true);
+        lastPacketTime = Date.now();
         try {
           const data = JSON.parse(e.data);
-          console.log("[WS TELEMETRY]", data);
-          if (data.ping === true || data.rssi !== undefined) {
-            setRoverOnline(true);
-            lastPacketTime = Date.now();
+          if (data.battery !== undefined || data.distance !== undefined) {
+             updateTelemetry(data);
           }
-        } catch (err) {}
+          if (data.rssi !== undefined) {
+             setRssi(data.rssi);
+          }
+        } catch (err) {
+          // Non-JSON message from ESP32 is fine - rover is still online
+        }
       };
 
-      const pollInterval = setInterval(async () => {
-        try {
-          const res = await fetch(`http://${ip}/telemetry`);
-          if (res.ok) {
-            if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ares_connection_active"));
-            setRoverOnline(true);
-            lastPacketTime = Date.now();
-            const rawText = await res.text();
-            try {
-              updateTelemetry(JSON.parse(rawText));
-            } catch (err) {}
-          }
-        } catch (err) {}
+      const watchdogInterval = setInterval(() => {
         if (Date.now() - lastPacketTime > 8000) {
           setRoverOnline(false);
         }
-      }, 1000);
+      }, 2000);
       const resetTelemetry = () => {
+        if (pingInterval) clearInterval(pingInterval);
         setRoverOnline(false);
         // Do not wipe out telemetry so the UI keeps displaying the last known values
       };
 
-      telemetryWs.onclose = resetTelemetry;
-      telemetryWs.onerror = resetTelemetry;
+      telemetryWs.onclose = (e) => {
+        console.warn("[WS] Telemetry closed", e);
+        if (initialConnect) {
+           toast.error("Lost connection to Rover.");
+        }
+        resetTelemetry();
+      };
+      telemetryWs.onerror = (e) => {
+        console.error("[WS] Telemetry error", e);
+        toast.error(`WebSocket Error: Could not connect to ${wsUrl}. Check if you are on the rover's WiFi!`);
+        resetTelemetry();
+      };
 
       return () => {
+        if (pingInterval) clearInterval(pingInterval);
         window.removeEventListener("ares_connection_active", onActive);
-        clearInterval(pollInterval);
+        clearInterval(watchdogInterval);
         globalWs = null;
         telemetryWs.close();
       };
     } catch (e) {
-      console.warn("Invalid streamSrc URL for WebSocket", e);
+      console.warn("Invalid rover IP for WebSocket", e);
+      toast.error("Invalid IP Address Format");
     }
-  }, [streamSrc]);
+  }, [roverIp, connectTrigger]);
 
   // Send camera URL to Python backend when available
   useEffect(() => {
@@ -1256,42 +1291,18 @@ export default function Dashboard() {
 
   const handleCapturePhoto = useCallback(async () => {
     try {
-      const img = document.getElementById('rover-video-stream') as HTMLImageElement;
-      if (!img || img.naturalWidth === 0) {
-        toast.error("⚠️ Capture Failed: No video stream active");
+      const base64Data = await extractCurrentFrameBase64();
+      if (!base64Data) {
+        toast.error("⚠️ Capture Failed: No video stream active or stream dropped.");
         return;
       }
-      
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      
-      const width = img.naturalWidth;
-      const height = img.naturalHeight;
-      
-      // Handle rotation swapping canvas dimensions
-      if (rotation % 180 !== 0) {
-        canvas.width = height;
-        canvas.height = width;
-      } else {
-        canvas.width = width;
-        canvas.height = height;
-      }
-      
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((rotation * Math.PI) / 180);
-      ctx.drawImage(img, -width / 2, -height / 2, width, height);
-      
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `ARES01_SNAP_${timestamp}.png`;
+      const filename = `ARES01_SNAP_${timestamp}.jpg`;
       
-      const dataUrl = canvas.toDataURL('image/png');
-      
-      // Try Tauri Native File System first
       try {
         if ((window as any).__TAURI_INTERNALS__) {
           await invoke('save_screenshot_command', { 
-            rawData: dataUrl,
+            rawData: base64Data,
             filename: filename
           });
           toast.success(`📸 Saved to Pictures/ARES-01`);
@@ -1301,35 +1312,18 @@ export default function Dashboard() {
         console.warn(`${LOG} Tauri native save failed, falling back to browser download`, err);
       }
       
-      // Fallback: Browser download (Anchor tag)
-      try {
-        canvas.toBlob((blob) => {
-          if (!blob) throw new Error("Blob generation failed");
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = filename;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          toast.success(`📸 Saved to Downloads`);
-        }, 'image/png');
-      } catch (blobErr) {
-        console.warn(`${LOG} toBlob failed, falling back to dataURL:`, blobErr);
-        const link = document.createElement('a');
-        link.href = dataUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        toast.success(`📸 Saved to Downloads`);
-      }
+      const link = document.createElement('a');
+      link.href = base64Data;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success(`📸 Saved to Downloads`);
     } catch (err) {
       console.error(`${LOG} Failed to capture photo:`, err);
       toast.error(`⚠️ Capture Failed: ${err instanceof Error ? err.message : err}`);
     }
-  }, [rotation]);
+  }, []);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -1499,7 +1493,13 @@ export default function Dashboard() {
     if (!firebaseConfigured) return;
     const unsubTelemetry = subscribeTelemetry(
       data => setLiveTelemetry(prev => ({ ...prev, ...data })),
-      online => setRoverOnline(online)
+      online => {
+        // Do not let Firebase force the UI offline if a local WebSocket is active
+        if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+          return;
+        }
+        setRoverOnline(online);
+      }
     );
     const unsubDb = subscribeDbConnection((connected) => {
       setFbStatus(connected ? "ready" : "not-configured");
@@ -1974,9 +1974,9 @@ export default function Dashboard() {
     
     setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [AI] Initiated directive: "${commandText}"`]);
 
-    while (isExecutingRef.current) {
-      const base64Frame = extractCurrentFrameBase64();
-      if (!base64Frame) {
+      while (isExecutingRef.current) {
+        const base64Frame = await extractCurrentFrameBase64();
+        if (!base64Frame) {
          setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [ERROR] Camera frame extraction failed.`]);
          break;
       }
@@ -2032,21 +2032,6 @@ export default function Dashboard() {
     isExecutingRef.current = false;
   };
 
-  const handleAiDirectiveSubmit = useCallback(async (overrideText?: string | any, source: "ai" | "voice" = "ai") => {
-    const rawTextToProcess = typeof overrideText === 'string' ? overrideText : directiveInput;
-    if (typeof rawTextToProcess !== 'string' || !rawTextToProcess.trim() || isProcessing || isExecutingRef.current) return;
-
-    const textToProcess = normalizeBengaliNumbers(rawTextToProcess);
-    setIsProcessing(true);
-    if (!overrideText) setDirectiveInput("");
-
-    executeAutonomousDirective(textToProcess);
-
-    setTimeout(() => {
-        setIsProcessing(false);
-    }, 500);
-  }, [directiveInput, isProcessing, commandUrl]);
-
   // ── Local Keyword Fallback (used when Gemini is unavailable) ─────────────
   const executeLocalKeywordFallback = useCallback((text: string, timestamp: string, pipelineTasks: string[]) => {
     const lowerText = text.toLowerCase();
@@ -2055,14 +2040,15 @@ export default function Dashboard() {
     if (['red ball', 'locate', 'red object', 'pick up the red ball'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [SYS] Phase 6.1 Hybrid NLP Parsed. Initiating Autonomous Target Lock Sequence.`);
       setAiTaskState("rotate_to_scan");
+      return;
     }
 
     // NAV
-    if (['সাম', 'আগা', 'এগি', 'forw', 'ahead', 'go'].some(k => lowerText.includes(k))) {
+    if (['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: FORWARD.`);
       setDriveDirection("FORWARD");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "FORWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    } else if (['পিছ', 'পেছ', 'পিছা', 'back', 'rev'].some(k => lowerText.includes(k))) {
+    } else if (['পিছনে', 'পেছনে', 'পিছা', 'back', 'rev'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: BACKWARD.`);
       setDriveDirection("BACKWARD");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "BACKWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
@@ -2074,7 +2060,7 @@ export default function Dashboard() {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: RIGHT.`);
       setDriveDirection("RIGHT");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "RIGHT", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    } else if (['থামো', 'দাঁড়াও', 'stop', 'halt', 'break'].some(k => lowerText.includes(k))) {
+    } else if (['থামো', 'দাঁড়াও', 'stop', 'halt', 'break'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system halted: STOP.`);
       setDriveDirection("STOP");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
@@ -2087,11 +2073,11 @@ export default function Dashboard() {
     }
 
     // ARM
-    if (['তোল', 'তুল', 'উঠ', 'ওঠ', 'নাও', 'ধর', 'pick', 'grab'].some(k => lowerText.includes(k))) {
+    if (['তোল', 'তুল', 'উঠাও', 'ওঠাও', 'নাও', 'ধর', 'pick', 'grab'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [ARM] Inverse kinematics matrix resolved. Actuating manipulator: PICKUP.`);
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    } else if (['ছাড', 'ছাড়', 'নামা', 'ফেল', 'drop', 'releas'].some(k => lowerText.includes(k))) {
+    } else if (['ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'drop', 'releas'].some(k => lowerText.includes(k))) {
       pipelineTasks.push(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
       setJoints(prev => ({ ...prev, gripper: 90 }));
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
@@ -2109,6 +2095,35 @@ export default function Dashboard() {
     }
   }, [commandUrl]);
 
+  const handleAiDirectiveSubmit = useCallback(async (overrideText?: string | any, source: "ai" | "voice" = "ai") => {
+    const rawTextToProcess = typeof overrideText === 'string' ? overrideText : directiveInput;
+    if (typeof rawTextToProcess !== 'string' || !rawTextToProcess.trim() || isProcessing || isExecutingRef.current) return;
+
+    const textToProcess = normalizeBengaliNumbers(rawTextToProcess);
+    setIsProcessing(true);
+    if (!overrideText) setDirectiveInput("");
+
+    // FAST-PATH: Local Keyword Matching (Instant response for voice/text driving)
+    const lowerText = textToProcess.toLowerCase();
+    const isNavCommand = ['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'পিছনে', 'পেছনে', 'পিছা', 'back', 'rev', 'বামে', 'বাম', 'left', 'ডানে', 'ডান', 'right', 'থামো', 'দাঁড়াও', 'stop', 'halt', 'break', 'তোল', 'তুল', 'উঠাও', 'ওঠাও', 'নাও', 'ধর', 'pick', 'grab', 'ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'drop', 'releas', 'হোম', 'জায়গা', 'সোজা', 'রিসেট', 'home', 'reset'].some(k => lowerText.includes(k));
+
+    if (isNavCommand) {
+        // Run instantly
+        const tasks = [`[${new Date().toLocaleTimeString()}] [SYS] Fast-path local command executed.`];
+        executeLocalKeywordFallback(textToProcess, new Date().toLocaleTimeString(), tasks);
+        setAiLogs(prev => [...prev, ...tasks].slice(-10));
+        setTimeout(() => setIsProcessing(false), 300);
+        return;
+    }
+
+    // SLOW-PATH: Send complex directives to Gemini
+    executeAutonomousDirective(textToProcess);
+
+    setTimeout(() => {
+        setIsProcessing(false);
+    }, 500);
+  }, [directiveInput, isProcessing, commandUrl, executeLocalKeywordFallback, executeAutonomousDirective]);
+
 
 
 
@@ -2124,100 +2139,6 @@ export default function Dashboard() {
   const recognitionRef = useRef<any | null>(null);
   const isVoiceProcessingRef = useRef(false);
   const shouldListenRef = useRef(false);
-
-  const parseAndRouteVoiceCommand = useCallback(async (command: string) => {
-    console.log("ARES-01 NLP Parsing Command: ", command);
-    const lower = command.toLowerCase();
-
-    // Auto detect language: Bengali characters reside in range \u0980 to \u09FF
-    const isBengali = /[\u0980-\u09FF]/.test(command);
-    const detectedLang = isBengali ? "bn" : "en";
-
-    // Map command result to history log
-    let mappedAction: ParsedCommand = "UNKNOWN";
-    let statusOk = false;
-
-    // Case 1: FORWARD COMMAND
-    if (lower.includes("সামনে যাও") || lower.includes("go forward") || lower.includes("সামনে")) {
-      await setDriveDirection("FORWARD");
-      mappedAction = "FORWARD";
-      statusOk = true;
-    }
-    // Case 2: BACKWARD COMMAND
-    else if (lower.includes("পেছনে যাও") || lower.includes("go backward") || lower.includes("পিছনে যাও")) {
-      await setDriveDirection("BACKWARD");
-      mappedAction = "BACKWARD";
-      statusOk = true;
-    }
-    // Case 3: AUTONOMOUS MACRO (PICK BALL)
-    else if (lower.includes("হাত তোলো") || lower.includes("pick ball") || lower.includes("বল তোলো")) {
-      await sendAutonomousCommand({
-        command: "PICK_BALL",
-        action: "PICK_BALL",
-        raw: command,
-        language: detectedLang,
-        timestamp: Date.now()
-      });
-      mappedAction = "PICK_BALL";
-      statusOk = true;
-    }
-    // Case 4: EMERGENCY STOP MAPPING
-    else if (lower.includes("থামো") || lower.includes("stop") || lower.includes("ব্রেক")) {
-      await setDriveDirection("STOP");
-      mappedAction = "STOP";
-      statusOk = true;
-    }
-    // Fallback case: General NLP ingestion for unstructured entries
-    else {
-      await sendAutonomousCommand({
-        command: "UNSTRUCTURED_DIRECTIVE",
-        action: "UNSTRUCTURED_DIRECTIVE",
-        raw: command,
-        language: detectedLang,
-        timestamp: Date.now()
-      });
-      mappedAction = "UNKNOWN";
-      statusOk = false;
-    }
-
-    const label = ACTION_LABELS[mappedAction] || "Direct Command";
-
-
-
-    if (firebaseConfigured) {
-      appendCommandLog({
-        raw_text: command,
-        parsed_intent: mappedAction,
-        timestamp: Date.now()
-      });
-    }
-
-    // Add to history log for visual dialogue bubbles
-    const userMsg: LogMessage = {
-      id: Date.now(),
-      sender: "user",
-      text: command,
-      action: `${mappedAction} — ${label}`,
-      time: new Date().toLocaleTimeString(),
-      status: statusOk ? "ok" : "warn",
-    };
-    setHistory(prev => [userMsg, ...prev].slice(0, 15));
-    setIsProcessing(true);
-
-    // Simulate system response after 800ms
-    setTimeout(() => {
-      const sysMsg: LogMessage = {
-        id: Date.now() + 1,
-        sender: "system",
-        text: getSystemResponse(mappedAction, command),
-        time: new Date().toLocaleTimeString(),
-        status: "ok",
-      };
-      setHistory(prev => [sysMsg, ...prev].slice(0, 15));
-      setIsProcessing(false);
-    }, 800);
-
-  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2357,7 +2278,7 @@ export default function Dashboard() {
     let cleanIp = rawIp.replace(/^https?:\/\//i, '').replace(/^ws:\/\//i, '').split('/')[0].trim();
     
     const newCommandUrl = `http://${cleanIp}`;
-    const newStreamUrl = `http://${cleanIp}/stream?cb=${Date.now()}`;
+    const newStreamUrl = `http://${cleanIp}:82/stream?cb=${Date.now()}`;
     
     setCommandUrl(newCommandUrl);
     setRoverIp(cleanIp);
@@ -2365,21 +2286,9 @@ export default function Dashboard() {
     // Bind stream instantly
     setStreamError(false);
     setStreamSrc(newStreamUrl);
+    setConnectTrigger(c => c + 1);
     
-    // Ping to verify connection
-    const startTime = performance.now();
-    fetch(newCommandUrl, { method: "GET", mode: "no-cors", cache: "no-store" })
-      .then(() => {
-        const latency = Math.round(performance.now() - startTime);
-        setPing(latency);
-        setRoverOnline(true);
-        toast.success("Connected to Rover");
-      })
-      .catch((err) => {
-        setRoverOnline(false);
-        setPing(null);
-        toast.error("Failed to connect to Rover");
-      });
+    toast.info("Connecting to Rover...");
   }, [roverIp]);
 
   const handleDisconnect = useCallback(() => {

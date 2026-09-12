@@ -106,36 +106,54 @@ async fn save_video_command(video_bytes: Vec<u8>, app_handle: tauri::AppHandle) 
 
 #[tauri::command]
 async fn read_firmware() -> Result<String, String> {
-    std::fs::read_to_string("d:\\ARES-01\\esp32_firmware\\src\\main.cpp")
-        .map_err(|e| format!("Failed to read firmware: {}", e))
+    // Embed the firmware source code directly into the Tauri App
+    let source_code = include_str!("../../../esp32_firmware/src/main.cpp");
+    Ok(source_code.to_string())
 }
 
 #[tauri::command]
 async fn flash_firmware(ssid: String, pass: String, app_handle: tauri::AppHandle) -> Result<String, String> {
-    let path = "d:\\ARES-01\\esp32_firmware\\src\\main.cpp";
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read firmware: {}", e))?;
-    
-    let re_ssid = regex::Regex::new(r#"const char \*sta_ssid\s*=\s*"[^"]*";"#).unwrap();
-    let re_pass = regex::Regex::new(r#"const char \*sta_password\s*=\s*"[^"]*";"#).unwrap();
-    
-    let updated = re_ssid.replace(&content, format!("const char *sta_ssid = \"{}\";", ssid).as_str());
-    let final_content = re_pass.replace(&updated, format!("const char *sta_password = \"{}\";", pass).as_str());
-    
-    std::fs::write(path, final_content.as_ref())
-        .map_err(|e| format!("Failed to write firmware: {}", e))?;
-    
     use std::process::{Command, Stdio};
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Write};
     use tauri::Emitter;
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
 
-    let mut child = Command::new("powershell")
-        .args(["-Command", "~/.platformio/penv/Scripts/pio.exe run -t upload --upload-port COM7"])
-        .current_dir("d:\\ARES-01\\esp32_firmware")
+    // Embed binaries into the executable
+    let esptool_bin = include_bytes!("../bin/esptool-x86_64-pc-windows-msvc.exe");
+    let firmware_bin = include_bytes!("../../../esp32_firmware/.pio/build/esp32s3dev/firmware.bin");
+
+    // Create a temporary directory for extraction
+    let temp_dir = env::temp_dir().join("ares_flasher");
+    if !temp_dir.exists() {
+        fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    }
+
+    let esptool_path = temp_dir.join("esptool.exe");
+    let firmware_path = temp_dir.join("firmware.bin");
+
+    // Write binaries to disk
+    fs::write(&esptool_path, esptool_bin).map_err(|e| format!("Failed to extract esptool: {}", e))?;
+    fs::write(&firmware_path, firmware_bin).map_err(|e| format!("Failed to extract firmware: {}", e))?;
+
+    let _ = app_handle.emit("build-log", "[SYS] Binaries extracted. Initiating esptool flasher...");
+
+    // Spawn esptool
+    let mut child = Command::new(&esptool_path)
+        .args([
+            "--chip", "esp32s3",
+            "--baud", "460800",
+            "--before", "default_reset",
+            "--after", "hard_reset",
+            "write_flash", "-z",
+            "0x10000",
+            firmware_path.to_str().unwrap()
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn pio: {}", e))?;
+        .map_err(|e| format!("Failed to spawn esptool: {}", e))?;
         
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
@@ -160,12 +178,37 @@ async fn flash_firmware(ssid: String, pass: String, app_handle: tauri::AppHandle
         }
     });
     
-    let status = child.wait().map_err(|e| format!("Failed to wait for pio: {}", e))?;
+    let status = child.wait().map_err(|e| format!("Failed to wait for esptool: {}", e))?;
     
+    // Clean up temporary files (Optional, but good practice)
+    let _ = fs::remove_dir_all(&temp_dir);
+
     if status.success() {
-        Ok("Flash successful!".to_string())
+        Ok("Flash successful! Rover should reboot now.".to_string())
     } else {
-        Err("Flash failed!".to_string())
+        Err("Flashing failed! Ensure the Rover is connected via USB and no other program is using the COM port.".to_string())
+    }
+}
+
+#[tauri::command]
+async fn flash_ota_firmware(ip: String) -> Result<String, String> {
+    // Embed the .bin into the executable so it works anywhere
+    let firmware_bin = include_bytes!("../../../esp32_firmware/.pio/build/esp32s3dev/firmware.bin");
+    
+    // POST the binary to http://<ip>/update
+    let url = format!("http://{}/update", ip);
+    let client = reqwest::Client::new();
+    
+    let res = client.post(&url)
+        .body(firmware_bin.to_vec())
+        .send()
+        .await
+        .map_err(|e| format!("OTA Failed to send firmware: {}", e))?;
+        
+    if res.status().is_success() {
+        Ok("Firmware flashed successfully via OTA!".to_string())
+    } else {
+        Err(format!("OTA Flashing failed with status: {}", res.status()))
     }
 }
 
@@ -184,7 +227,7 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![capture_photo, send_drive_command, send_arm_command, save_screenshot_command, save_video_command, read_firmware, flash_firmware])
+    .invoke_handler(tauri::generate_handler![capture_photo, send_drive_command, send_arm_command, save_screenshot_command, save_video_command, read_firmware, flash_firmware, flash_ota_firmware])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

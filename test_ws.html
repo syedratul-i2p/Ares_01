@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h2>WebSocket Test</h2>
+<input type="text" id="ip" value="192.168.210.196" />
+<button onclick="test()">Test Connection</button>
+<pre id="log"></pre>
+<script>
+function log(msg) {
+    document.getElementById('log').innerHTML += msg + '<br>';
+}
+function test() {
+    var ip = document.getElementById('ip').value;
+    var ws = new WebSocket('ws://' + ip + ':81/');
+    log('Connecting to ' + ip + '...');
+    ws.onopen = function() {
+        log('CONNECTED!');
+        ws.send(JSON.stringify({ping: true}));
+    };
+    ws.onmessage = function(e) {
+        log('RECEIVED: ' + e.data);
+    };
+    ws.onerror = function(e) {
+        log('ERROR! ' + e);
+    };
+    ws.onclose = function(e) {
+        log('CLOSED!');
+    };
+}
+</script>
+</body>
+</html>
