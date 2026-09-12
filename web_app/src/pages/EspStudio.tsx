@@ -42,21 +42,18 @@ export default function EspStudio() {
         const code = await invoke<string>("read_firmware");
         setFirmwareCode(code);
         toast.success("Code Viewer Synced via Rust Backend!");
-      } else {
-        setFirmwareCode(
-`// ============================================================================
-// ARES-01 EMBEDDED FIRMWARE (ESP32-S3 FreeRTOS Dual-Core Architecture)
-// ============================================================================
-// [BROWSER MODE ACTIVE]
-// WebSerial USB Serial Monitor & NVS Configuration are fully active in Chrome!
-// Direct firmware recompilation and flashing via esptool runs in the Desktop App.
-//
-// Hardware Pins: SDA=1, SCL=2 (Dual PCA9685 at 0x40 & 0x41)
-// WiFi Modes: AP (192.168.4.1) & STA (Auto-Reconnect)
-// Telemetry: Port 81 (WebSocket) | Stream: Port 82 (MJPEG) | API: Port 80 (HTTP)
-// ============================================================================`
-        );
+        return;
       }
+      
+      // Browser mode: fetch full original C++ firmware source from public asset
+      const res = await fetch("/firmware_main.cpp");
+      if (res.ok) {
+        const code = await res.text();
+        setFirmwareCode(code);
+        toast.success("ESP32 Firmware Source loaded successfully!");
+        return;
+      }
+      throw new Error("Unable to load static firmware file");
     } catch (err) {
       setFirmwareCode("// Unable to load firmware source.");
     }
