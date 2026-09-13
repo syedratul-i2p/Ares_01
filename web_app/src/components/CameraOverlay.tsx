@@ -4,16 +4,12 @@ import { Camera, Video, RotateCw } from "lucide-react";
 interface CameraOverlayProps {
   onCapturePhoto: () => void;
   onRecordVideo: () => void;
-  onRotate: () => void;
-  rotation: number;
   isRecording?: boolean;
 }
 
 export const CameraOverlay = React.memo(function CameraOverlay({
   onCapturePhoto,
   onRecordVideo,
-  onRotate,
-  rotation,
   isRecording = false,
 }: CameraOverlayProps) {
   const [flash, setFlash] = useState(false);
@@ -94,20 +90,6 @@ export const CameraOverlay = React.memo(function CameraOverlay({
             </div>
           )}
         </div>
-
-        <div className="w-[1px] h-6 bg-slate-800" />
-
-        {/* Rotate Button */}
-        <button
-          onClick={onRotate}
-          title="Rotate Camera"
-          className="group relative flex items-center gap-2 h-10 pl-3 pr-2 rounded-full bg-slate-800/50 border border-slate-600/50 hover:bg-emerald-500/20 hover:border-emerald-400/60 hover:shadow-[0_0_12px_rgba(16,185,129,0.4)] active:scale-95 transition-all duration-200"
-        >
-          <RotateCw className="w-[18px] h-[18px] text-emerald-400 group-active:rotate-180 transition-transform duration-500 ease-out" />
-          <span className="text-[10px] font-mono font-bold tracking-widest bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-full border border-emerald-500/30">
-            {rotation}°
-          </span>
-        </button>
 
       </div>
     </>

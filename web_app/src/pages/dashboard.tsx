@@ -555,7 +555,6 @@ interface CameraViewProps {
   setStreamSrc: React.Dispatch<React.SetStateAction<string | null>>;
   roverOnline: boolean;
   roverIp: string;
-  rotation: number;
   streamKey: number;
   isRebooting: boolean;
   isStreamSevered: boolean;
@@ -569,7 +568,6 @@ const CameraView = React.memo(function CameraView({
   setStreamSrc,
   roverOnline,
   roverIp,
-  rotation,
   streamKey,
   isRebooting,
   isStreamSevered
@@ -598,7 +596,7 @@ const CameraView = React.memo(function CameraView({
       <div 
         className="relative w-full h-full origin-center transform-gpu will-change-transform z-10"
         style={{ 
-          transform: `rotate(${rotation}deg) scale(${rotation % 180 !== 0 ? aspectScale : 1})`,
+          transform: `rotate(90deg) scale(${aspectScale})`,
           transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
         }}
       >
@@ -1098,15 +1096,6 @@ export default function Dashboard() {
   const [streamSrc, setStreamSrc] = useState<string | null>(null);
   const [streamKey, setStreamKey] = useState(Date.now());
   const [streamError, setStreamError] = useState(false);
-  const [rotation, setRotation] = useState<number>(() => Number(localStorage.getItem('ares_cam_rotation') || 0));
-
-  useEffect(() => {
-    localStorage.setItem('ares_cam_rotation', rotation.toString());
-  }, [rotation]);
-
-  const handleRotate = useCallback(() => {
-    setRotation(prev => (prev + 90) % 360);
-  }, []);
 
   // ── Toast Notification State
 
@@ -2657,7 +2646,6 @@ export default function Dashboard() {
               setStreamSrc={setStreamSrc}
               roverOnline={roverOnline}
               roverIp={roverIp}
-              rotation={rotation}
               streamKey={streamKey}
               isRebooting={rebooting}
               isStreamSevered={isStreamSevered}
@@ -2668,8 +2656,6 @@ export default function Dashboard() {
           <CameraOverlay 
             onCapturePhoto={handleCapturePhoto} 
             onRecordVideo={handleRecordVideo} 
-            onRotate={handleRotate}
-            rotation={rotation}
             isRecording={isRecording} 
           />
         </div>
