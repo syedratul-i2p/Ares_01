@@ -574,7 +574,7 @@ const CameraView = React.memo(function CameraView({
 }: CameraViewProps) {
   const [isStreamLoading, setIsStreamLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [aspectScale, setAspectScale] = useState(1.35);
+  const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const retryCountRef = useRef(0);
 
   useEffect(() => {
@@ -583,7 +583,7 @@ const CameraView = React.memo(function CameraView({
       for (let entry of entries) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
-          setAspectScale(Math.min(width / height, height / width));
+          setContainerSize({ w: width, h: height });
         }
       }
     });
@@ -593,46 +593,40 @@ const CameraView = React.memo(function CameraView({
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-[#050505] overflow-hidden flex items-center justify-center rounded-xl">
-      {/* ROTATED CAMERA CONTAINER */}
-      <div 
-        className="absolute inset-0 origin-center transform-gpu will-change-transform z-10 flex items-center justify-center"
-        style={{ 
-          transform: `rotate(90deg) scale(${aspectScale})`,
-          transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
-        }}
-      >
-        {roverOnline && streamSrc ? (
-          <img 
-            id="rover-video-stream"
-            key={streamKey}
-            src={isStreamSevered || isRebooting ? "" : `${streamSrc}&t=${streamKey}`} 
-            alt="ARES-01 live feed"
-            className="w-full h-full object-contain pointer-events-none select-none"
-            style={{ display: streamError || !roverOnline || isStreamSevered || isRebooting ? 'none' : 'block' }}
-            onLoad={() => {
-              retryCountRef.current = 0;
+      
+      {roverOnline && streamSrc ? (
+        <img 
+          id="rover-video-stream"
+          key={streamKey}
+          src={isStreamSevered || isRebooting ? "" : `${streamSrc}&t=${streamKey}`} 
+          alt="ARES-01 live feed"
+          className="absolute origin-center pointer-events-none select-none"
+          style={{ 
+            display: streamError || !roverOnline || isStreamSevered || isRebooting ? 'none' : 'block',
+            width: containerSize.h > 0 ? `${containerSize.h}px` : '100%',
+            height: containerSize.w > 0 ? `${containerSize.w}px` : '100%',
+            transform: 'rotate(90deg)',
+            objectFit: 'cover'
+          }}
+          onLoad={() => {
+            retryCountRef.current = 0;
+            setIsStreamLoading(false);
+            setStreamError(false);
+          }}
+          onError={() => {
+            if (isRebooting || isStreamSevered) return;
+            if (retryCountRef.current < 5) {
+              retryCountRef.current += 1;
+              setTimeout(() => {
+                setStreamSrc(`http://${roverIp}:82/stream?timestamp=${Date.now()}`);
+              }, 1000);
+            } else {
+              setStreamError(true);
               setIsStreamLoading(false);
-              setStreamError(false);
-            }}
-            onLoadStart={() => console.log(`[ARES-01] Camera stream loading from ${streamSrc}`)}
-            onError={(e) => {
-              if (retryCountRef.current < 5) {
-                retryCountRef.current += 1;
-                console.log(`[ARES-01] Camera dropped. Auto-retrying (${retryCountRef.current}/5)...`);
-                setTimeout(() => {
-                  if (streamSrc) {
-                    setStreamSrc(`${streamSrc.split('?')[0]}?cb=${Date.now()}`);
-                  }
-                }, 1000);
-              } else {
-                setStreamError(true);
-                setIsStreamLoading(false);
-              }
-            }}
-            data-testid="camera-feed"
-          />
-        ) : null}
-      </div>
+            }
+          }}
+        />
+      ) : null}
 
       {/* UNROTATED OVERLAY CONTAINER */}
       <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center rounded-xl overflow-hidden">

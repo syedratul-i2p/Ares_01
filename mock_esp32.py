@@ -11,10 +11,13 @@ Architecture:
 
 import asyncio
 import cv2
+import io
 import json
 import numpy as np
 import threading
 import time
+from datetime import datetime
+from PIL import Image, ImageDraw, ImageFont
 from flask import Flask, Response, request
 
 # ──────────────────────────────────────────────────────────────────────
@@ -93,19 +96,50 @@ def start_api_service():
 stream_app = Flask("stream")
 
 def generate_mjpeg_frames():
+    frame_count = 0
+    font = ImageFont.load_default()
     while True:
         if is_rebooting:
             break
-        frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        cv2.putText(frame, "ARES-01 LIVE", (180, 220),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2)
-        cv2.putText(frame, time.strftime("%H:%M:%S"), (220, 270),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (200, 200, 255), 2)
-        cv2.putText(frame, f"FRAME {int(time.time()*25) % 10000:04d}", (210, 310),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 255, 100), 1)
-        _, buf = cv2.imencode('.jpg', frame)
+        
+        # Create a temporary square or correctly proportioned canvas for drawing
+        draw_width, draw_height = 480, 640  # Flipped dimensions
+        temp_img = Image.new('RGB', (draw_width, draw_height), color=(30, 30, 40))
+        temp_draw = ImageDraw.Draw(temp_img)
+        
+        # Draw a moving grid to simulate video motion
+        offset = (frame_count * 5) % 40
+        for i in range(0, draw_width, 40):
+            temp_draw.line([(i + offset, 0), (i + offset, draw_height)], fill=(50, 50, 70), width=2)
+        for i in range(0, draw_height, 40):
+            temp_draw.line([(0, i + offset), (draw_width, i + offset)], fill=(50, 50, 70), width=2)
+            
+        # Draw a bouncing ball to simulate movement
+        ball_y = abs((frame_count * 10) % (draw_height * 2) - draw_height)
+        ball_x = abs((frame_count * 15) % (draw_width * 2) - draw_width)
+        temp_draw.ellipse([(ball_x-20, ball_y-20), (ball_x+20, ball_y+20)], fill=(0, 255, 100))
+
+        # Draw the text
+        text1 = "ARES-01 LIVE STREAM (MOCK)"
+        text2 = datetime.now().strftime("%H:%M:%S")
+        text3 = f"FRAME {frame_count}"
+        
+        # Center the text
+        temp_draw.text((draw_width//2 - 90, draw_height//2 - 20), text1, font=font, fill=(0, 255, 0))
+        temp_draw.text((draw_width//2 - 40, draw_height//2), text2, font=font, fill=(255, 255, 255))
+        temp_draw.text((draw_width//2 - 40, draw_height//2 + 20), text3, font=font, fill=(200, 200, 200))
+        
+        # Now rotate the temporary image by +90 degrees to match the UI's -90 degree rotation
+        # so that when the UI rotates it back, it is perfectly upright!
+        img = temp_img.rotate(90, expand=True)
+
+        img_byte_arr = io.BytesIO()
+        img.save(img_byte_arr, format='JPEG')
+        buf = img_byte_arr.getvalue()
+
         yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n')
+               b'Content-Type: image/jpeg\r\n\r\n' + buf + b'\r\n')
+        frame_count += 1
         time.sleep(0.04)
 
 @stream_app.route('/stream', methods=['GET'])
