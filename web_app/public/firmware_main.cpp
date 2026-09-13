@@ -319,6 +319,10 @@ TaskHandle_t streamTaskHandle;
 TaskHandle_t controlTaskHandle;
 
 void streamTask(void *pvParameters) {
+  // Give the camera hardware 3 seconds to power up and stabilize on the I2C bus
+  // (Previously, the blocking WiFi connection naturally delayed this)
+  vTaskDelay(pdMS_TO_TICKS(3000));
+
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -369,8 +373,9 @@ void streamTask(void *pvParameters) {
     vTaskDelay(pdMS_TO_TICKS(500));
   }
   if (err != ESP_OK) {
-    Serial.printf("Camera init absolute failure. System restarting...\n");
-    esp_restart(); // Force hardware reboot if camera remains unresponsive
+    Serial.printf("Camera init absolute failure. Bypassing camera hardware...\n");
+    camera_fault = true;
+    vTaskDelete(NULL); // Terminate this task, let the rest of the rover run
   } else {
     ESP_LOGI(TAG_CAM, "Warming up sensor AEC/AGC...");
     uint8_t warmup_fail_count = 0;
