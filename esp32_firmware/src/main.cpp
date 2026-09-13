@@ -496,7 +496,7 @@ void controlTask(void *pvParameters) {
 }
 
 void setup() {
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Disable Brownout detector
+  // WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Re-enabled brownout for safety // Disable Brownout detector
   delay(2000);
   Serial.begin(115200);
   Serial.setTimeout(10); // CRITICAL: Prevent readStringUntil from blocking Core 0!
@@ -523,6 +523,7 @@ void setup() {
   vTaskDelay(pdMS_TO_TICKS(100));
 
   WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm); // Limit TX power to prevent brownouts!
   delay(500);
 
   preferences.begin("ares", false);
@@ -691,7 +692,7 @@ void controlTask(void *pvParameters) {
 }
 
 void setup() {
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Disable Brownout detector
+  // WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Re-enabled brownout for safety // Disable Brownout detector
   delay(2000);
   Serial.begin(115200);
   Serial.setTimeout(10); // CRITICAL: Prevent readStringUntil from blocking Core 0!
@@ -719,6 +720,7 @@ void setup() {
   vTaskDelay(pdMS_TO_TICKS(50));
 
   WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm); // Limit TX power to prevent brownouts!
   delay(500);
 
   preferences.begin("ares", false);

@@ -226,7 +226,7 @@ const Header = React.memo(function Header({
         <div className="flex items-center p-1 rounded-full bg-slate-200/80 dark:bg-black/40 border border-slate-300/50 dark:border-white/10 shadow-inner relative backdrop-blur-lg">
             <button
               onClick={() => onToggleRoverMode("MANUAL")}
-              className={`relative flex items-center gap-1.5 px-5 py-1.5 rounded-full text-sm font-extrabold tracking-widest transition-all duration-300 z-10 ${
+              className={`relative flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-extrabold tracking-widest transition-all duration-300 z-10 ${
                 roverMode === "MANUAL" ? "text-slate-900 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:text-white/40 dark:hover:text-white/70"
               }`}
             >
@@ -243,7 +243,7 @@ const Header = React.memo(function Header({
             
             <button
               onClick={() => onToggleRoverMode("AUTONOMOUS")}
-              className={`relative flex items-center gap-1.5 px-5 py-1.5 rounded-full text-sm font-extrabold tracking-widest transition-all duration-300 z-10 ${
+              className={`relative flex items-center gap-1.5 px-4 py-1 rounded-full text-xs font-extrabold tracking-widest transition-all duration-300 z-10 ${
                 roverMode === "AUTONOMOUS" ? "text-indigo-700 dark:text-white drop-shadow-sm" : "text-slate-500 hover:text-indigo-600/70 dark:text-white/40 dark:hover:text-white/70"
               }`}
             >
@@ -714,9 +714,9 @@ const DPad = React.memo(function DPad({
   };
 
   return (
-    <div className="flex flex-col items-center justify-between h-full w-full py-1">
-      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mt-1">Drive Controls</div>
-      <div className="flex flex-col items-center gap-2 select-none mb-1">
+    <div className="flex flex-col items-center justify-between h-full w-full py-0">
+      <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mt-0 mb-0.5">Drive Controls</div>
+      <div className="flex flex-col items-center gap-1 select-none mb-1">
         <button
           className={getButtonClass("forward")}
           onMouseDown={() => { onPress("forward"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
@@ -967,9 +967,9 @@ const ArmControls = React.memo(function ArmControls({
   }, [joints]);
 
   return (
-    <div className="arm-controls-wrapper flex flex-col gap-1.5 py-0.5">
+    <div className="arm-controls-wrapper flex flex-col gap-1 py-0">
       <div className="flex items-center justify-between">
-        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">5DOF Arm Control</div>
+        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">5DOF Arm Control</div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"
             onClick={handleResetArm} data-testid="btn-arm-reset">
@@ -993,7 +993,7 @@ const ArmControls = React.memo(function ArmControls({
         })}
       </div>
 
-      <div className="arm-canvas-sliders-flex flex flex-col md:flex-row gap-4 md:gap-2 items-center bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-3 md:p-1.5 md:py-2 w-full font-sans backdrop-blur-md shadow-lg">
+      <div className="arm-canvas-sliders-flex flex flex-col md:flex-row gap-2 md:gap-1 items-center bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-2 md:p-1 md:py-1 w-full font-sans backdrop-blur-md shadow-lg">
         <div className="arm-canvas-wrapper relative w-[130px] h-[80px] rounded-lg border border-slate-700 bg-slate-900 overflow-hidden shrink-0 flex items-center justify-center shadow-[inset_0_2px_15px_rgba(0,0,0,0.6)]">
           <canvas ref={canvasRef} width={130} height={80} className="w-full h-full block" />
         </div>
@@ -2642,7 +2642,7 @@ export default function Dashboard() {
         <div className="w-full lg:w-[45%] flex-1 overflow-y-auto overflow-x-hidden flex flex-col bg-background z-10 pb-6 pt-2">
         
         {/* 2. MODE SELECTOR TABS */}
-        <div className="shrink-0 px-4 pt-4 md:pt-2.5 pb-2 bg-transparent z-10">
+        <div className="shrink-0 px-4 pt-1 pb-1 bg-transparent z-10" style={{ display: roverMode === 'MANUAL' ? 'none' : 'block' }}>
           <div className="relative flex overflow-x-auto scrollbar-hide flex-nowrap rounded-xl bg-muted/80 p-1 gap-1 max-w-xl mx-auto border border-border/50">
             {CONTROL_TABS.filter(tab => roverMode === "AUTONOMOUS" ? (tab.id === "ai" || tab.id === "voice") : tab.id === "manual").map(tab => (
               <button key={tab.id} onClick={() => { setControlMode(tab.id); }}
@@ -2675,8 +2675,8 @@ export default function Dashboard() {
               <motion.div key="manual"
                 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
-                className={`px-4 py-3 md:h-full md:overflow-x-hidden md:overflow-y-auto flex items-start justify-center`}>
-                <div className="your-main-control-container flex flex-col items-center justify-start gap-2 w-full max-w-md mx-auto py-1 px-1 mt-1">
+                className={`px-4 py-0 md:h-full md:overflow-x-hidden md:overflow-y-auto flex items-start justify-center`}>
+                <div className="your-main-control-container flex flex-col items-center justify-start gap-0 w-full max-w-md mx-auto py-0 px-1 mt-0">
                   {/* TOP: 5DOF Arm */}
                   <div className="arm-control-section shrink-0 w-full max-w-[360px] flex flex-col items-center justify-center">
                     <ArmControls
@@ -2700,7 +2700,7 @@ export default function Dashboard() {
                   </div>
 
                   {/* BOTTOM: Drive D-Pad */}
-                  <div className="drive-control-section shrink-0 w-[240px] h-[240px] bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-3 backdrop-blur-md shadow-lg relative pb-8">
+                  <div className="drive-control-section shrink-0 w-[240px] bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-2 backdrop-blur-md shadow-lg relative">
                     <DPad
                       activeDirection={activeDirection}
                       onPress={handleDirectionPress}
