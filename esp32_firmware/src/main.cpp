@@ -111,7 +111,6 @@ void executeHardwareCommand(String mode, String action, String direction,
       Hardware.setArmMotor("shoulder", "", 90);
       Hardware.setArmMotor("elbow", "", 90);
       Hardware.setArmMotor("wrist", "", 90);
-      Hardware.setArmMotor("gripper", "", 90);
     }
     return;
   }
@@ -418,28 +417,27 @@ void streamTask(void *pvParameters) {
     sensor_t *s = esp_camera_sensor_get();
     if (s) {
       // -- Image Quality & Brightness --
-      s->set_brightness(s, 1);       // +1 brightness boost (fixes dark image)
+      s->set_brightness(s, 1);       // +1 brightness boost
       s->set_contrast(s, 1);         // +1 contrast for sharper details
       s->set_saturation(s, 1);       // +1 saturation for vivid colors
       // -- Auto White Balance --
       s->set_whitebal(s, 1);         // AWB enabled
       s->set_awb_gain(s, 1);         // AWB gain enabled
       s->set_wb_mode(s, 0);          // Auto WB mode
-      // -- Auto Gain Control --
+      // -- Auto Gain Control (FIX NOISE) --
       s->set_gain_ctrl(s, 1);        // AGC enabled
-      s->set_gainceiling(s, (gainceiling_t)5); // 32x gain for low light
+      s->set_gainceiling(s, (gainceiling_t)2); // LOWER gain to 4x (reduces 'jirjire' noise)
       // -- Auto Exposure Control --
       s->set_exposure_ctrl(s, 1);    // AEC enabled
       s->set_aec2(s, 1);             // AEC DSP algorithm enabled
-      s->set_ae_level(s, 1);         // +1 AE level (brighter exposure target)
-      s->set_aec_value(s, 400);      // Higher AEC target for brightness
+      s->set_ae_level(s, 0);         // Reset AE level to default (prevents overexposure noise)
       // -- Orientation --
       s->set_vflip(s, 1);
       s->set_hmirror(s, 1);
       // -- Sharpness & Noise --
-      s->set_sharpness(s, 2);
-      s->set_denoise(s, 1);
-      ESP_LOGI(TAG_CAM, "Sensor calibrated with enhanced brightness/contrast.");
+      s->set_sharpness(s, 1);        // Lower sharpness slightly to blend noise
+      s->set_denoise(s, 1);          // Denoise ON
+      ESP_LOGI(TAG_CAM, "Sensor calibrated with low-noise settings.");
     }
   }
 

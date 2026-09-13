@@ -1838,7 +1838,10 @@ export default function Dashboard() {
 
   const handleResetArm = useCallback(() => {
     animateJointsTo(DEFAULT_JOINTS, "Home (reset)");
-    if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+    if (commandUrl) {
+      sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+      sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "gripper", angle: 90 }).catch(e => { console.error(e); });
+    }
   }, [animateJointsTo, commandUrl]);
 
   const applyPreset = useCallback((p: typeof ARM_PRESETS[0]) => {
@@ -2057,11 +2060,11 @@ export default function Dashboard() {
     const durationSec = numMatch ? parseFloat(numMatch[1]) : 0;
 
     // Keywords
-    const hasDriveKeyword = ['সামনে', 'আগা', 'এগিয়ে', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight'].some(k => lowerText.includes(k));
-    const hasReverseKeyword = ['পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao'].some(k => lowerText.includes(k));
-    const hasPickKeyword = ['তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tulo', 'tolo', 'uthao', 'dhoro', 'nao', 'pikap', 'উঠা', 'তুলে', 'ওঠাও', 'collect', 'lift'].some(k => lowerText.includes(k));
-    const hasDropKeyword = ['ছাড়', 'ছাড়ো', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo'].some(k => lowerText.includes(k));
-    const hasScanKeyword = ['চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo'].some(k => lowerText.includes(k));
+    const hasDriveKeyword = ['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight', 'ফরওয়ার্ড'].some(k => lowerText.includes(k));
+    const hasReverseKeyword = ['পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao', 'ব্যাক', 'রিভার্স'].some(k => lowerText.includes(k));
+    const hasPickKeyword = ['তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tulo', 'tolo', 'uthao', 'dhoro', 'nao', 'pikap', 'উঠা', 'তুলে', 'ওঠাও', 'collect', 'lift', 'পিকআপ', 'পিক'].some(k => lowerText.includes(k));
+    const hasDropKeyword = ['ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo', 'ড্রপ', 'রিলিজ'].some(k => lowerText.includes(k));
+    const hasScanKeyword = ['চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo', 'স্ক্যান', 'সার্চ'].some(k => lowerText.includes(k));
 
     // Color keyword detection
     const colorMap: Record<string, string> = {
@@ -2080,7 +2083,7 @@ export default function Dashboard() {
     }
 
     // If color + object word detected but no explicit pick keyword, treat as pick
-    const hasObjectWord = ['বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu'].some(k => lowerText.includes(k));
+    const hasObjectWord = ['বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu', 'অবজেক্ট'].some(k => lowerText.includes(k));
     const hasColorAndObject = detectedColorEntry && hasObjectWord;
 
     // A. Sequential Macro: Reverse and Drop
@@ -2113,7 +2116,7 @@ export default function Dashboard() {
     }
 
     // B. Sequential Macro: Forward and Pick
-    if (hasDriveKeyword && hasPickKeyword) {
+    if (hasDriveKeyword && (hasPickKeyword || hasColorAndObject)) {
       const driveDuration = durationSec > 0 ? durationSec * 1000 : 2000;
       appendLog(`[${timestamp}] [MISSION] Phase 1: Driving forward to target (${driveDuration / 1000}s)...`);
       setDriveDirection("FORWARD");
@@ -2257,15 +2260,21 @@ export default function Dashboard() {
     }
 
     if (hasPickKeyword || hasColorAndObject) {
-      appendLog(`[${timestamp}] [ARM] Inverse kinematics resolved. Actuating manipulator: PICKUP.`);
+      appendLog(`[${timestamp}] [ARM] Inverse kinematics resolved. Actuating manipulator down: PICKUP.`);
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
       
-      // Auto-return to HOME after servos reach position (4 seconds)
-      setTimeout(() => {
-        setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
-        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
-      }, 4000);
+      await new Promise(r => setTimeout(r, 3500));
+      
+      appendLog(`[${new Date().toLocaleTimeString()}] [ARM] Closing gripper on payload.`);
+      setJoints(prev => ({ ...prev, gripper: 0 }));
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "gripper", angle: 0 }).catch(console.error);
+      
+      await new Promise(r => setTimeout(r, 2000));
+      
+      appendLog(`[${new Date().toLocaleTimeString()}] [ARM] Returning to Home pose with payload.`);
+      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
 
     } else if (hasDropKeyword) {
       appendLog(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
@@ -2304,21 +2313,21 @@ export default function Dashboard() {
     // FAST-PATH: Local Keyword Matching (Instant response for voice/text driving)
     const lowerText = textToProcess.toLowerCase();
     const isNavCommand = [
-      'সামনে', 'আগা', 'এগিয়ে', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight',
-      'পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao',
-      'বামে', 'বাম', 'left', 'বাঁয়ে', 'বাঁয়ে', 'bame', 'bam',
+      'সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight', 'ফরওয়ার্ড',
+      'পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao', 'ব্যাক', 'রিভার্স',
+      'বামে', 'বাম', 'left', 'বাঁয়ে', 'bame', 'bam',
       'ডানে', 'ডান', 'right', 'ডানদিকে', 'daine', 'dan',
-      'থামো', 'দাঁড়াও', 'দাঁড়াও', 'দাড়াও', 'থাম', 'দারান', 'দাঁড়ান', 'stop', 'halt', 'break', 'thamo', 'dara', 'thak',
-      'তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tolo', 'tulo', 'dhoro', 'pikap', 'উঠা', 'তুলে', 'ওঠাও', 'collect', 'lift',
-      'ছাড়', 'ছাড়ো', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo',
+      'থামো', 'দাঁড়াও', 'দাড়াও', 'থাম', 'দারান', 'দাঁড়ান', 'stop', 'halt', 'break', 'thamo', 'dara', 'thak',
+      'তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tulo', 'tolo', 'uthao', 'dhoro', 'pikap', 'উঠা', 'তুলে', 'ওঠাও', 'collect', 'lift', 'পিকআপ', 'পিক',
+      'ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo', 'ড্রপ', 'রিলিজ',
       'হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal',
-      'চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo',
+      'চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo', 'স্ক্যান', 'সার্চ',
       'নাচ', 'ডান্স', 'dance', 'celebrate', 'nacho', 'anondo', 'ghuro',
       'sec', 'সেকেন্ড',
       // Color keywords (triggers pick when combined with object words)
-      'লাল', 'red', 'নীল', 'blue', 'সবুজ', 'green', 'হলুদ', 'yellow', 'কালো', 'black', 'সাদা', 'white', 'shada', 'sada',
+      'লাল', 'red', 'নীল', 'blue', 'সবুজ', 'green', 'হলুদ', 'yellow', 'কালো', 'black', 'সাদা', 'white', 'shada', 'sada', 'হোয়াইট', 'গ্রিন', 'ব্লু', 'ইয়েলো', 'ব্ল্যাক', 'রেড',
       // Object words
-      'বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu'
+      'বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu', 'অবজেক্ট'
     ].some(k => lowerText.includes(k));
 
     if (isNavCommand) {
