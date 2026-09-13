@@ -367,14 +367,14 @@ void streamTask(void *pvParameters) {
   if (psramFound()) {
     ESP_LOGI(TAG_CAM, "PSRAM Found. Initializing stable buffers.");
     config.frame_size = FRAMESIZE_VGA;
-    config.jpeg_quality = 12;
+    config.jpeg_quality = 10;
     config.fb_count = 2;
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_LATEST;
   } else {
     ESP_LOGW(TAG_CAM, "WARNING: PSRAM NOT FOUND!");
     config.frame_size = FRAMESIZE_SVGA;
-    config.jpeg_quality = 12;
+    config.jpeg_quality = 10;
     config.fb_count = 1;
     config.fb_location = CAMERA_FB_IN_DRAM;
   }
@@ -417,14 +417,29 @@ void streamTask(void *pvParameters) {
 
     sensor_t *s = esp_camera_sensor_get();
     if (s) {
-      s->set_whitebal(s, 1);
-      s->set_gain_ctrl(s, 1);
-      s->set_exposure_ctrl(s, 1);
+      // -- Image Quality & Brightness --
+      s->set_brightness(s, 1);       // +1 brightness boost (fixes dark image)
+      s->set_contrast(s, 1);         // +1 contrast for sharper details
+      s->set_saturation(s, 1);       // +1 saturation for vivid colors
+      // -- Auto White Balance --
+      s->set_whitebal(s, 1);         // AWB enabled
+      s->set_awb_gain(s, 1);         // AWB gain enabled
+      s->set_wb_mode(s, 0);          // Auto WB mode
+      // -- Auto Gain Control --
+      s->set_gain_ctrl(s, 1);        // AGC enabled
+      s->set_gainceiling(s, (gainceiling_t)5); // 32x gain for low light
+      // -- Auto Exposure Control --
+      s->set_exposure_ctrl(s, 1);    // AEC enabled
+      s->set_aec2(s, 1);             // AEC DSP algorithm enabled
+      s->set_ae_level(s, 1);         // +1 AE level (brighter exposure target)
+      s->set_aec_value(s, 400);      // Higher AEC target for brightness
+      // -- Orientation --
       s->set_vflip(s, 1);
       s->set_hmirror(s, 1);
+      // -- Sharpness & Noise --
       s->set_sharpness(s, 2);
       s->set_denoise(s, 1);
-      ESP_LOGI(TAG_CAM, "Sensor calibrated successfully.");
+      ESP_LOGI(TAG_CAM, "Sensor calibrated with enhanced brightness/contrast.");
     }
   }
 

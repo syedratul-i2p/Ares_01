@@ -2057,11 +2057,31 @@ export default function Dashboard() {
     const durationSec = numMatch ? parseFloat(numMatch[1]) : 0;
 
     // Keywords
-    const hasDriveKeyword = ['সামনে', 'আগা', 'এগিয়ে', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight'].some(k => lowerText.includes(k));
+    const hasDriveKeyword = ['সামনে', 'আগা', 'এগিয়ে', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight'].some(k => lowerText.includes(k));
     const hasReverseKeyword = ['পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao'].some(k => lowerText.includes(k));
-    const hasPickKeyword = ['তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tulo', 'tolo', 'uthao', 'dhoro', 'nao', 'pikap'].some(k => lowerText.includes(k));
-    const hasDropKeyword = ['ছাড়', 'ছাড়ো', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo'].some(k => lowerText.includes(k));
+    const hasPickKeyword = ['তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tulo', 'tolo', 'uthao', 'dhoro', 'nao', 'pikap', 'উঠা', 'তুলে', 'ওঠাও', 'collect', 'lift'].some(k => lowerText.includes(k));
+    const hasDropKeyword = ['ছাড়', 'ছাড়ো', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo'].some(k => lowerText.includes(k));
     const hasScanKeyword = ['চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo'].some(k => lowerText.includes(k));
+
+    // Color keyword detection
+    const colorMap: Record<string, string> = {
+      'লাল': 'RED', 'red': 'RED',
+      'নীল': 'BLUE', 'blue': 'BLUE',
+      'সবুজ': 'GREEN', 'green': 'GREEN',
+      'হলুদ': 'YELLOW', 'yellow': 'YELLOW',
+      'কালো': 'BLACK', 'black': 'BLACK',
+      'সাদা': 'WHITE', 'white': 'WHITE', 'shada': 'WHITE', 'sada': 'WHITE',
+      'হোয়াইট': 'WHITE', 'গ্রিন': 'GREEN', 'ব্লু': 'BLUE', 'ইয়েলো': 'YELLOW',
+      'ব্ল্যাক': 'BLACK', 'রেড': 'RED',
+    };
+    const detectedColorEntry = Object.entries(colorMap).find(([k]) => lowerText.includes(k));
+    if (detectedColorEntry) {
+      appendLog(`[${timestamp}] [VISION] Target color identified: ${detectedColorEntry[1]}`);
+    }
+
+    // If color + object word detected but no explicit pick keyword, treat as pick
+    const hasObjectWord = ['বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu'].some(k => lowerText.includes(k));
+    const hasColorAndObject = detectedColorEntry && hasObjectWord;
 
     // A. Sequential Macro: Reverse and Drop
     if (hasReverseKeyword && hasDropKeyword) {
@@ -2111,10 +2131,16 @@ export default function Dashboard() {
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(console.error);
       
-      await new Promise(r => setTimeout(r, 1400));
+      await new Promise(r => setTimeout(r, 3500));
       
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Gripping payload and returning to Home pose.`);
-      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Closing gripper on payload.`);
+      setJoints(prev => ({ ...prev, gripper: 0 }));
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "gripper", angle: 0 }).catch(console.error);
+      
+      await new Promise(r => setTimeout(r, 2000));
+      
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 5: Returning arm to Home pose with payload.`);
+      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
       
       toast.success("Autonomous Pick Mission Completed!");
@@ -2230,27 +2256,27 @@ export default function Dashboard() {
       setAiTaskState("idle");
     }
 
-    if (hasPickKeyword) {
+    if (hasPickKeyword || hasColorAndObject) {
       appendLog(`[${timestamp}] [ARM] Inverse kinematics resolved. Actuating manipulator: PICKUP.`);
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
       
-      // Auto-stop DC motors after 1 second
+      // Auto-return to HOME after servos reach position (4 seconds)
       setTimeout(() => {
         setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
         if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
-      }, 1200);
+      }, 4000);
 
     } else if (hasDropKeyword) {
       appendLog(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
       setJoints(prev => ({ ...prev, gripper: 90 }));
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
       
-      // Auto-stop DC motors after 1 second
+      // Auto-return to HOME after gripper releases (3 seconds)
       setTimeout(() => {
         setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
         if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
-      }, 1200);
+      }, 3000);
 
     } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal'].some(k => lowerText.includes(k))) {
       appendLog(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
@@ -2278,17 +2304,21 @@ export default function Dashboard() {
     // FAST-PATH: Local Keyword Matching (Instant response for voice/text driving)
     const lowerText = textToProcess.toLowerCase();
     const isNavCommand = [
-      'সামনে', 'আগা', 'এগিয়ে', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight',
+      'সামনে', 'আগা', 'এগিয়ে', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight',
       'পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao',
-      'বামে', 'বাম', 'left', 'বাঁয়ে', 'বাঁয়ে', 'bame', 'bam',
+      'বামে', 'বাম', 'left', 'বাঁয়ে', 'বাঁয়ে', 'bame', 'bam',
       'ডানে', 'ডান', 'right', 'ডানদিকে', 'daine', 'dan',
-      'থামো', 'দাঁড়াও', 'দাঁড়াও', 'দাড়াও', 'থাম', 'দারান', 'দাঁড়ান', 'stop', 'halt', 'break', 'thamo', 'dara', 'thak',
-      'তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tolo', 'tulo', 'dhoro', 'pikap',
-      'ছাড়', 'ছাড়ো', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo',
-      'হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal',
+      'থামো', 'দাঁড়াও', 'দাঁড়াও', 'দাড়াও', 'থাম', 'দারান', 'দাঁড়ান', 'stop', 'halt', 'break', 'thamo', 'dara', 'thak',
+      'তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tolo', 'tulo', 'dhoro', 'pikap', 'উঠা', 'তুলে', 'ওঠাও', 'collect', 'lift',
+      'ছাড়', 'ছাড়ো', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo',
+      'হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal',
       'চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo',
       'নাচ', 'ডান্স', 'dance', 'celebrate', 'nacho', 'anondo', 'ghuro',
-      'sec', 'সেকেন্ড'
+      'sec', 'সেকেন্ড',
+      // Color keywords (triggers pick when combined with object words)
+      'লাল', 'red', 'নীল', 'blue', 'সবুজ', 'green', 'হলুদ', 'yellow', 'কালো', 'black', 'সাদা', 'white', 'shada', 'sada',
+      // Object words
+      'বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu'
     ].some(k => lowerText.includes(k));
 
     if (isNavCommand) {
@@ -2825,7 +2855,7 @@ export default function Dashboard() {
                           onChange={e => setVoiceLanguage(e.target.value)}
                           className="px-2 py-1 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer text-slate-800 dark:text-slate-200 font-medium"
                         >
-                          <option value="bn-IN">বাংলা</option>
+                          <option value="bn-BD">বাংলা</option>
                           <option value="en-US">English</option>
                         </select>
                       </div>
