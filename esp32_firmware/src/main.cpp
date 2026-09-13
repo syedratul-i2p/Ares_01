@@ -617,20 +617,24 @@ void setup() {
   webSocket.onEvent(webSocketEvent);
   ESP_LOGI(TAG_SYS, "Web Servers and WebSocket Server Started.");
 
-  xTaskCreatePinnedToCore(
-      [](void *pvParameters) {
-        for (;;) {
-          webSocket.loop();
-          server.handleClient();
-          vTaskDelay(pdMS_TO_TICKS(15));
-        }
-      },
-      "API_Task", 4096, NULL, 1, NULL, 1); // MOVE TO CORE 1!
+    // Create API Task (WebSockets) on Core 1 with HIGH Priority (2) for instant response
+    xTaskCreatePinnedToCore(
+        [](void *pvParameters) {
+          for (;;) {
+            webSocket.loop();
+            server.handleClient();
+            vTaskDelay(pdMS_TO_TICKS(15));
+          }
+        },
+        "API_Task", 4096, NULL, 2, NULL, 1); 
 
-  xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 1,
-                          &streamTaskHandle, 1);
-  xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 1,
-                          &controlTaskHandle, 1); // MOVE TO CORE 1!
+    // Create Stream Task on Core 1 with LOW Priority (1) so it doesn't starve WebSockets
+    xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 1,
+                            &streamTaskHandle, 1);
+    
+    // Create Control Task on Core 1 with HIGH Priority (2) for instant motor I2C commands
+    xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 2,
+                            &controlTaskHandle, 1); 
   ESP_LOGI(TAG_SYS, "FreeRTOS Dual-Core Architecture initialized!");
 }
 
