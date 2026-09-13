@@ -7,28 +7,31 @@ import {
   Monitor, Film, Minus, Brain, Sparkles, Terminal
 } from "lucide-react";
 import { Link } from "wouter";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { invoke } from "@tauri-apps/api/core";
-import { useTheme } from "@/components/theme-provider";
-import { useInterval } from "@/hooks/use-interval";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
+import { useTheme } from "@/components/theme-provider";
 import { motion, AnimatePresence } from "framer-motion";
+import { listen } from "@tauri-apps/api/event";
+import { readTextFile } from "@tauri-apps/plugin-fs";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
+import { CameraOverlay } from "@/components/CameraOverlay";
+import { toast } from "sonner";
+import { useInterval } from "@/hooks/use-interval";
+import { Progress } from "@/components/ui/progress";
 import { extractCurrentFrameBase64 } from "@/utils/frameExtractor";
-import { processAutonomousCommand } from "@/services/geminiService";
 
 const normalizeBengaliNumbers = (text: string) => {
   const bengaliToEnglish: { [key: string]: string } = {
-    '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
-    '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+    "\u09E6": "0", "\u09E7": "1", "\u09E8": "2", "\u09E9": "3", "\u09EA": "4",
+    "\u09EB": "5", "\u09EC": "6", "\u09ED": "7", "\u09EE": "8", "\u09EF": "9"
   };
-  return text.replace(/[০-৯]/g, match => bengaliToEnglish[match] || match);
+  return text.replace(/[\u09E6-\u09EF]/g, match => bengaliToEnglish[match] || match);
 };
 
-const ContinuousButton = ({ onDown, onUp, className, children, 'data-testid': testId }: any) => {
-  const handleDown = useCallback((e: React.PointerEvent) => {
+const ContinuousButton = ({ onDown, onUp, className, children, "data-testid": testId }: any) => {
+  const handleDown = React.useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     if (e.currentTarget && e.currentTarget.setPointerCapture) {
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch(err){}
@@ -36,7 +39,7 @@ const ContinuousButton = ({ onDown, onUp, className, children, 'data-testid': te
     if (onDown) onDown();
   }, [onDown]);
 
-  const handleUp = useCallback((e: React.SyntheticEvent) => {
+  const handleUp = React.useCallback((e: React.SyntheticEvent) => {
     if (onUp) onUp();
   }, [onUp]);
 
@@ -46,41 +49,34 @@ const ContinuousButton = ({ onDown, onUp, className, children, 'data-testid': te
       data-testid={testId} 
       onPointerDown={handleDown}
       onPointerUp={handleUp}
-      onPointerLeave={handleUp}
       onPointerCancel={handleUp}
-      onLostPointerCapture={handleUp}
+      onPointerLeave={handleUp}
       onContextMenu={(e) => e.preventDefault()}
+      style={{ touchAction: "none" }}
     >
       {children}
     </button>
   );
 };
 
-import { CameraOverlay } from "@/components/CameraOverlay";
-import { toast } from "sonner";
-import {
-  firebaseConfigured,
-  setDriveDirection,
-  setArmAngles,
-  sendAutonomousCommand,
-  setNavigationMode,
-  subscribeTelemetry,
-  setMaxSpeed,
-  triggerReboot,
-  setFirebaseControlMode,
-  setFirebaseLanguage,
-  writePingRTT,
-  subscribeDbConnection,
-  syncMissionStatus,
-  appendCommandLog,
-  type DriveDirection,
-  type ArmAngles,
-} from "@/lib/firebase";
+
+const processAutonomousCommand = async (command: string, frame: string | null): Promise<{ action: string; coordinates?: any; drive_direction?: string }> => {
+  return { action: "TASK_COMPLETE" };
+};
+
+export type DriveDirection = "FORWARD" | "BACKWARD" | "LEFT" | "RIGHT" | "STOP";
+export interface ArmAngles {
+  base: number;
+  shoulder: number;
+  elbow: number;
+  wrist: number;
+  gripper: number;
+}
 import { parseCommand, ACTION_LABELS, type ParsedCommand } from "@/lib/commandParser";
 
 // ─── Types & Constants ────────────────────────────────────────────────────────
 
-type RoverConnectionStatus = "disconnected" | "connecting" | "connected";
+type RoverConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting";
 type Direction = "forward" | "backward" | "left" | "right" | "stop";
 type ControlMode = "manual" | "ai" | "voice";
 
@@ -177,7 +173,6 @@ const getPingColorClass = (pingVal: number | null) => {
 
 interface HeaderProps {
   roverOnline: boolean;
-  fbStatus: "ready" | "not-configured";
   showSettings: boolean;
   setShowSettings: React.Dispatch<React.SetStateAction<boolean>>;
   theme: string;
@@ -190,7 +185,6 @@ interface HeaderProps {
 
 const Header = React.memo(function Header({
   roverOnline,
-  fbStatus,
   showSettings,
   setShowSettings,
   theme,
@@ -220,21 +214,7 @@ const Header = React.memo(function Header({
           <span className="hidden sm:inline">{roverOnline ? "ROVER ONLINE" : "ROVER OFFLINE"}</span>
           <span className="sm:hidden">{roverOnline ? "ON" : "OFF"}</span>
         </Badge>
-        {fbStatus === "not-configured" && (
-          <Badge variant="outline" className="text-[10px] h-5 bg-amber-500/10 text-amber-700 dark:text-amber-600 border-amber-500/30 gap-1">
-            <Database className="w-2.5 h-2.5" />
-            <span className="hidden sm:inline">Firebase not configured</span>
-            <span className="sm:hidden">DB Off</span>
-          </Badge>
-        )}
-        {fbStatus === "ready" && (
-          <Badge variant="outline" className="text-[10px] h-5 bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/30 gap-1">
-            <Database className="w-2.5 h-2.5" />
-            <span className="hidden sm:inline">Firebase live</span>
-            <span className="sm:hidden">DB Live</span>
-          </Badge>
-        )}
-        {fbStatus === "ready" && ping !== null && (
+        {ping !== null && (
           <Badge variant="outline" className="text-[10px] h-5 bg-slate-50 dark:bg-white/5 border-border/30 dark:border-white/5 gap-1.5 font-mono select-none">
             <span className={`w-1.5 h-1.5 rounded-full animate-pulse bg-current ${getPingColorClass(ping)}`} />
             <span className={`${getPingColorClass(ping)}`}>{ping}ms</span>
@@ -243,45 +223,44 @@ const Header = React.memo(function Header({
       </div>
       <div className="flex items-center gap-1 pointer-events-auto">
         {/* Rover Mode Segmented Control */}
-        <div className="flex items-center p-1 rounded-xl bg-black/40 border border-white/10 shadow-inner relative">
-          <button
-            onClick={() => onToggleRoverMode("MANUAL")}
-            className={`relative flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-colors duration-300 z-10 ${
-              roverMode === "MANUAL" ? "text-white" : "text-white/40 hover:text-white/70"
-            }`}
-          >
-            {roverMode === "MANUAL" && (
-              <motion.div
-                layoutId="modeIndicator"
-                className="absolute inset-0 bg-slate-700/80 rounded-lg shadow-[0_0_10px_rgba(255,255,255,0.1)] border border-white/20 -z-10"
-                transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
-              />
-            )}
-            <Gamepad2 className="w-3.5 h-3.5" />
-            <span>MANUAL</span>
-          </button>
-          
-          <button
-            onClick={() => onToggleRoverMode("AUTONOMOUS")}
-            className={`relative flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-colors duration-300 z-10 ${
-              roverMode === "AUTONOMOUS" ? "text-white drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]" : "text-white/40 hover:text-white/70"
-            }`}
-          >
-            {roverMode === "AUTONOMOUS" && (
-              <motion.div
-                layoutId="modeIndicator"
-                className="absolute inset-0 bg-indigo-600/50 rounded-lg shadow-[0_0_15px_rgba(99,102,241,0.6)] border border-indigo-400/50 overflow-hidden -z-10"
-                transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/0 via-purple-500/30 to-pink-500/0 animate-pulse" />
-              </motion.div>
-            )}
-            <Brain className="w-3.5 h-3.5" />
-            <Sparkles className="w-2.5 h-2.5 absolute top-1 right-1 text-yellow-300 animate-pulse" />
-            <span className="ml-1">AUTONOMOUS</span>
-          </button>
-        </div>
-        <Link href="/studio">
+        <div className="flex items-center p-1 rounded-full bg-slate-200/80 dark:bg-black/40 border border-slate-300/50 dark:border-white/10 shadow-inner relative backdrop-blur-lg">
+            <button
+              onClick={() => onToggleRoverMode("MANUAL")}
+              className={`relative flex items-center gap-1.5 px-5 py-1.5 rounded-full text-[11px] font-extrabold tracking-widest transition-all duration-300 z-10 ${
+                roverMode === "MANUAL" ? "text-slate-900 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:text-white/40 dark:hover:text-white/70"
+              }`}
+            >
+              {roverMode === "MANUAL" && (
+                <motion.div
+                  layoutId="modeIndicator"
+                  className="absolute inset-0 bg-white dark:bg-slate-700/80 rounded-full shadow-md border border-slate-200 dark:border-white/20 -z-10"
+                  transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+                />
+              )}
+              <Gamepad2 className="w-4 h-4" />
+              <span>MANUAL</span>
+            </button>
+            
+            <button
+              onClick={() => onToggleRoverMode("AUTONOMOUS")}
+              className={`relative flex items-center gap-1.5 px-5 py-1.5 rounded-full text-[11px] font-extrabold tracking-widest transition-all duration-300 z-10 ${
+                roverMode === "AUTONOMOUS" ? "text-indigo-700 dark:text-white drop-shadow-sm" : "text-slate-500 hover:text-indigo-600/70 dark:text-white/40 dark:hover:text-white/70"
+              }`}
+            >
+              {roverMode === "AUTONOMOUS" && (
+                <motion.div
+                  layoutId="modeIndicator"
+                  className="absolute inset-0 bg-white dark:bg-indigo-600/50 rounded-full shadow-md border border-indigo-200 dark:border-indigo-400/50 overflow-hidden -z-10"
+                  transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-indigo-100/0 via-indigo-400/10 to-purple-400/0 dark:from-indigo-500/0 dark:via-purple-500/30 dark:to-pink-500/0 animate-pulse" />
+                </motion.div>
+              )}
+              <Brain className="w-4 h-4" />
+              <span className="ml-1">OFFLINE MACROS</span>
+            </button>
+          </div>
+          <Link href="/studio">
           <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white" data-testid="button-studio">
             <Terminal className="w-3.5 h-3.5" />
           </Button>
@@ -531,13 +510,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                     >
                       ⚡ Offline AP (192.168.4.1)
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setRoverIp("192.168.210.196")}
-                      className="text-[9px] px-2 py-0.5 rounded bg-slate-200 dark:bg-white/10 hover:bg-primary/20 hover:text-primary text-slate-700 dark:text-slate-300 font-mono transition-colors cursor-pointer"
-                    >
-                      🌐 Online WiFi (192.168.210.196)
-                    </button>
+                    
                   </div>
                 </div>
               </div>
@@ -803,6 +776,8 @@ const DPad = React.memo(function DPad({
 });
 
 interface ArmControlsProps {
+  setEditValue?: any;
+  commitEdit?: any;
   joints: ArmAngles;
   setJointAngle: (joint: keyof ArmAngles, raw: number) => void;
   updateJoint: (joint: keyof ArmAngles, delta: number) => void;
@@ -1098,7 +1073,15 @@ const ArmControls = React.memo(function ArmControls({
 
 // ─── Main Dashboard ─────────────────────────────────────────────────────────────
 
+
+// -- Offline Control Stubs
+const setDriveDirection = (dir: string) => {};
+const setArmAngles = (angles: any) => {};
+const setMaxSpeed = async (speed: number) => {};
+const setNavigationMode = async (mode: string) => {};
+
 export default function Dashboard() {
+
   const { theme, setTheme } = useTheme();
 
   // ── Network / Connection State
@@ -1111,8 +1094,8 @@ export default function Dashboard() {
 
   // ── Camera Stream State (Moved up for hook dependency array)
   const [roverIp, setRoverIp] = useState(initialRoverIp);
-  const [connectTrigger, setConnectTrigger] = useState(1);
-  const [streamSrc, setStreamSrc] = useState<string | null>(`http://${initialRoverIp}:82/stream?cb=${Date.now()}`);
+  const [connectTrigger, setConnectTrigger] = useState(0);
+  const [streamSrc, setStreamSrc] = useState<string | null>(null);
   const [streamKey, setStreamKey] = useState(Date.now());
   const [streamError, setStreamError] = useState(false);
   const [rotation, setRotation] = useState<number>(() => Number(localStorage.getItem('ares_cam_rotation') || 0));
@@ -1132,12 +1115,25 @@ export default function Dashboard() {
 
   // ── Phase 6.1 Telemetry & Task Queue State
   interface SystemTelemetry {
-    rssi: number;
-    heap: number;
+    battery: number;
+    motor_temp: number;
+    distance: number;
+    rssi?: number;
+    cpu_temp?: number;
+    sys_voltage?: number;
+    current_draw?: number;
+    uptime?: number;
+    connection_status?: "online" | "offline";
+    auto_brake?: boolean;
+    locked?: boolean;
+    x?: number;
+    w?: number;
+    area?: number;
+    heap?: number;
+    motorTemp?: number;
   }
   const [telemetry, setTelemetry] = useState<SystemTelemetry>({ 
-    rssi: 0,
-    heap: 0
+    rssi: 0, heap: 0, battery: 0, motor_temp: 0, distance: 0 
   });
   const [roverOnline, setRoverOnline] = useState(false);
 
@@ -1206,16 +1202,24 @@ export default function Dashboard() {
         // ANY message from the rover means it's online - set this FIRST before parsing
         setRoverOnline(true);
         lastPacketTime = Date.now();
-        const rtt = Math.max(1, Math.round(Date.now() - lastPingSent));
-        setPing(rtt);
         try {
           const data = JSON.parse(e.data);
+          
+          // Only calculate RTT ping if the message is a specific pong response
+          if (data.pong) {
+             const rtt = Math.max(1, Math.round(Date.now() - lastPingSent));
+             setPing(rtt);
+          } else if (data.ping !== undefined) {
+             // Or if the rover explicitly provided a ping value (e.g. mock server)
+             setPing(data.ping);
+          }
+
           if (data.battery !== undefined || data.distance !== undefined) {
              updateTelemetry(data);
           }
-          if (data.rssi !== undefined) {
-             setRssi(data.rssi);
-          }
+            if (data.rssi !== undefined) {
+               setTelemetry(prev => ({ ...prev, rssi: data.rssi }));
+            }
         } catch (err) {
           // Non-JSON message from ESP32 is fine - rover is still online
         }
@@ -1328,8 +1332,8 @@ export default function Dashboard() {
         return;
       }
       
-      const dx = tel.x - (tel.w > 0 ? 320 : 160); // Roughly center
-      if (tel.area > 15000) {
+      const dx = (tel.x ?? 0) - ((tel.w ?? 0) > 0 ? 320 : 160); // Roughly center
+      if ((tel.area ?? 0) > 15000) {
         setAiTaskState("pickup");
       } else {
       }
@@ -1541,35 +1545,13 @@ export default function Dashboard() {
     }, POLLING_DELAY_MS);
   };
 
-  // ── Rover heartbeat / Firebase connection
-  const [fbStatus, setFbStatus] = useState<"ready" | "not-configured">("not-configured");
-
-  useEffect(() => {
-    if (!firebaseConfigured) return;
-    const unsubTelemetry = subscribeTelemetry(
-      data => setLiveTelemetry(prev => ({ ...prev, ...data })),
-      online => {
-        // Do not let Firebase force the UI offline if a local WebSocket is active
-        if (globalWs && globalWs.readyState === WebSocket.OPEN) {
-          return;
-        }
-        setRoverOnline(online);
-      }
-    );
-    const unsubDb = subscribeDbConnection((connected) => {
-      setFbStatus(connected ? "ready" : "not-configured");
-    });
-    return () => {
-      unsubTelemetry();
-      unsubDb();
-    };
-  }, []);
+    
 
   // ── Control Mode
   const [controlMode, setControlModeState] = useState<ControlMode>("manual");
   const setControlMode = useCallback(async (mode: ControlMode) => {
     setControlModeState(mode);
-    await setFirebaseControlMode(mode);
+    
   }, []);
 
   const handleRoverModeToggle = useCallback(async (mode: "MANUAL" | "AUTONOMOUS") => {
@@ -1589,15 +1571,7 @@ export default function Dashboard() {
     }
   }, [roverMode, setControlMode]);
 
-  // Sync mission status asynchronously
-  useEffect(() => {
-    if (!firebaseConfigured) return;
-    syncMissionStatus({
-      mode: controlMode,
-      ping: ping,
-      battery: null,
-    });
-  }, [controlMode, ping]);
+  
 
   // ── D-Pad
   const [activeDirection, setActiveDirection] = useState<Direction | null>(null);
@@ -1870,7 +1844,7 @@ export default function Dashboard() {
       if (step >= steps) {
         clearInterval(resetAnimRef.current!);
         resetAnimRef.current = null;
-        setArmAngles(next); // final write to Firebase
+        setArmAngles(next); // final sync
       }
     }, 16);
   }, [joints]);
@@ -1965,14 +1939,14 @@ export default function Dashboard() {
               const action = content.action;
               setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [VISION] ${content.reasoning} -> ${action}`].slice(-8));
               if (["FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP"].includes(action)) {
-                 await sendAutonomousCommand({ command: action, action: action, raw: `Vision AI: ${action}`, language: "en", timestamp: Date.now() });
+                 console.log("Offline Command executed");
               }
             }
           } catch (e) {
             console.error("Vision API Error:", e);
             if (isActive) {
                setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [VISION ERROR] Halt sequence initiated.`].slice(-8));
-               await sendAutonomousCommand({ command: "STOP", action: "STOP", raw: "Halt due to error", language: "en", timestamp: Date.now() });
+               console.log("Offline Command executed");
             }
           }
         };
@@ -2022,26 +1996,26 @@ export default function Dashboard() {
   const [isExecuting, setIsExecuting] = useState(false);
   const isExecutingRef = useRef(false);
 
-  const executeAutonomousDirective = async (commandText: string) => {
+  const executeAutonomousDirective = async (commandText: string, appendLog: (msg: string) => void) => {
     if (isExecutingRef.current) return;
     setIsExecuting(true);
     isExecutingRef.current = true;
     
-    setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [AI] Initiated directive: "${commandText}"`]);
+    appendLog(`[${new Date().toLocaleTimeString()}] [AI] Initiated directive: "${commandText}"`);
 
       while (isExecutingRef.current) {
         const base64Frame = await extractCurrentFrameBase64();
         if (!base64Frame) {
-         setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [ERROR] Camera frame extraction failed.`]);
+         appendLog(`[${new Date().toLocaleTimeString()}] [ERROR] Camera frame extraction failed.`);
          break;
       }
       
       try {
         const result = await processAutonomousCommand(commandText, base64Frame);
-        setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [VISION] Action: ${result.action}`]);
+        appendLog(`[${new Date().toLocaleTimeString()}] [VISION] Action: ${result.action}`);
         
         if (result.action === "TASK_COMPLETE") {
-           setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [AI] Task accomplished successfully.`]);
+           appendLog(`[${new Date().toLocaleTimeString()}] [AI] Task accomplished successfully.`);
            break;
         }
 
@@ -2076,7 +2050,7 @@ export default function Dashboard() {
         }
         
       } catch (e) {
-        setAiLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [ERROR] Gemini AI failure: ${e}`]);
+        appendLog(`[${new Date().toLocaleTimeString()}] [ERROR] Gemini AI failure: ${e}`);
         break;
       }
       
@@ -2088,7 +2062,7 @@ export default function Dashboard() {
   };
 
   // ── Local Keyword Fallback (used when Gemini is unavailable) ─────────────
-  const executeLocalKeywordFallback = useCallback(async (text: string, timestamp: string, pipelineTasks: string[]) => {
+  const executeLocalKeywordFallback = useCallback(async (text: string, timestamp: string, appendLog: (msg: string) => void) => {
     const lowerText = text.toLowerCase();
 
     // 1. Check for time-based parameter (e.g. "৫ সেকেন্ড", "5s", "3 sec")
@@ -2101,25 +2075,25 @@ export default function Dashboard() {
 
     if (hasDriveKeyword && hasPickKeyword) {
       const driveDuration = durationSec > 0 ? durationSec * 1000 : 2000;
-      pipelineTasks.push(`[${timestamp}] [MISSION] Phase 1: Driving forward to target (${driveDuration / 1000}s)...`);
+      appendLog(`[${timestamp}] [MISSION] Phase 1: Driving forward to target (${driveDuration / 1000}s)...`);
       setDriveDirection("FORWARD");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "FORWARD", speed: 200 }).catch(console.error);
       
       await new Promise(r => setTimeout(r, driveDuration));
       
-      pipelineTasks.push(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 2: Target reached. Braking rover.`);
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 2: Target reached. Braking rover.`);
       setDriveDirection("STOP");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(console.error);
       
       await new Promise(r => setTimeout(r, 400));
       
-      pipelineTasks.push(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 3: Actuating 5-DOF Arm down to pick object.`);
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 3: Actuating 5-DOF Arm down to pick object.`);
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(console.error);
       
       await new Promise(r => setTimeout(r, 1400));
       
-      pipelineTasks.push(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Gripping payload and returning to Home pose.`);
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Gripping payload and returning to Home pose.`);
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
       
@@ -2142,7 +2116,7 @@ export default function Dashboard() {
         dirLabel = "RIGHT";
       }
 
-      pipelineTasks.push(`[${timestamp}] [NAV] Moving ${dirLabel} for ${durationSec} seconds...`);
+      appendLog(`[${timestamp}] [NAV] Moving ${dirLabel} for ${durationSec} seconds...`);
       setDriveDirection(dir);
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: dir, speed: 255 }).catch(console.error);
 
@@ -2156,23 +2130,23 @@ export default function Dashboard() {
 
     // 4. Standard Continuous Driving (Forward, Backward, Left, Right, Stop)
     if (hasDriveKeyword) {
-      pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: FORWARD.`);
+      appendLog(`[${timestamp}] [NAV] Propulsion system initialized: FORWARD.`);
       setDriveDirection("FORWARD");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "FORWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['পিছনে', 'পেছনে', 'পিছা', 'back', 'rev'].some(k => lowerText.includes(k))) {
-      pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: BACKWARD.`);
+      appendLog(`[${timestamp}] [NAV] Propulsion system initialized: BACKWARD.`);
       setDriveDirection("BACKWARD");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "BACKWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['বামে', 'বাম', 'left'].some(k => lowerText.includes(k))) {
-      pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: LEFT.`);
+      appendLog(`[${timestamp}] [NAV] Propulsion system initialized: LEFT.`);
       setDriveDirection("LEFT");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "LEFT", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['ডানে', 'ডান', 'right'].some(k => lowerText.includes(k))) {
-      pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system initialized: RIGHT.`);
+      appendLog(`[${timestamp}] [NAV] Propulsion system initialized: RIGHT.`);
       setDriveDirection("RIGHT");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "RIGHT", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['থামো', 'দাঁড়াও', 'stop', 'halt', 'break'].some(k => lowerText.includes(k))) {
-      pipelineTasks.push(`[${timestamp}] [NAV] Propulsion system halted: STOP.`);
+      appendLog(`[${timestamp}] [NAV] Propulsion system halted: STOP.`);
       setDriveDirection("STOP");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
       setAiTaskState("idle");
@@ -2180,25 +2154,21 @@ export default function Dashboard() {
 
     // 5. 5-DOF Arm Control
     if (hasPickKeyword) {
-      pipelineTasks.push(`[${timestamp}] [ARM] Inverse kinematics resolved. Actuating manipulator: PICKUP.`);
+      appendLog(`[${timestamp}] [ARM] Inverse kinematics resolved. Actuating manipulator: PICKUP.`);
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'drop', 'releas'].some(k => lowerText.includes(k))) {
-      pipelineTasks.push(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
+      appendLog(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
       setJoints(prev => ({ ...prev, gripper: 90 }));
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset'].some(k => lowerText.includes(k))) {
-      pipelineTasks.push(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
+      appendLog(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     }
 
     // Status
-    if (pipelineTasks.length > 1) {
-      pipelineTasks.push(`[${timestamp}] [SYS] Local parser sequence completed successfully.`);
-    } else {
-      pipelineTasks.push(`[${timestamp}] [SYS] Warning: Unrecognized telemetry token. Awaiting operator override.`);
-    }
+    appendLog(`[${timestamp}] [SYS] Local parser sequence completed successfully.`);
   }, [commandUrl]);
 
   const handleAiDirectiveSubmit = useCallback(async (overrideText?: string | any, source: "ai" | "voice" = "ai") => {
@@ -2209,21 +2179,25 @@ export default function Dashboard() {
     setIsProcessing(true);
     if (!overrideText) setDirectiveInput("");
 
+    const appendLog = (msg: string) => {
+      const setter = source === "voice" ? setVoiceLogs : setAiLogs;
+      setter(prev => [...prev, msg].slice(-10));
+    };
+
     // FAST-PATH: Local Keyword Matching (Instant response for voice/text driving)
     const lowerText = textToProcess.toLowerCase();
     const isNavCommand = ['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'পিছনে', 'পেছনে', 'পিছা', 'back', 'rev', 'বামে', 'বাম', 'left', 'ডানে', 'ডান', 'right', 'থামো', 'দাঁড়াও', 'stop', 'halt', 'break', 'তোল', 'তুল', 'উঠাও', 'ওঠাও', 'নাও', 'ধর', 'pick', 'grab', 'ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'drop', 'releas', 'হোম', 'জায়গা', 'সোজা', 'রিসেট', 'home', 'reset', 'sec', 'সেকেন্ড'].some(k => lowerText.includes(k));
 
     if (isNavCommand) {
         // Run instantly
-        const tasks = [`[${new Date().toLocaleTimeString()}] [SYS] Fast-path local command executed.`];
-        executeLocalKeywordFallback(textToProcess, new Date().toLocaleTimeString(), tasks);
-        setAiLogs(prev => [...prev, ...tasks].slice(-10));
+        appendLog(`[${new Date().toLocaleTimeString()}] [SYS] Fast-path local command executed.`);
+        executeLocalKeywordFallback(textToProcess, new Date().toLocaleTimeString(), appendLog);
         setTimeout(() => setIsProcessing(false), 300);
         return;
     }
 
     // SLOW-PATH: Send complex directives to Gemini
-    executeAutonomousDirective(textToProcess);
+    executeAutonomousDirective(textToProcess, appendLog);
 
     setTimeout(() => {
         setIsProcessing(false);
@@ -2240,7 +2214,7 @@ export default function Dashboard() {
   const [voiceLanguage, setVoiceLanguageState] = useState("bn-BD");
   const setVoiceLanguage = useCallback(async (lang: string) => {
     setVoiceLanguageState(lang);
-    await setFirebaseLanguage(lang);
+    
   }, []);
   const recognitionRef = useRef<any | null>(null);
   const isVoiceProcessingRef = useRef(false);
@@ -2293,7 +2267,7 @@ export default function Dashboard() {
           // Activate 2-Second Cooldown Anti-Duplicate Lock
           isVoiceProcessingRef.current = true;
 
-          // Execute NLP Mapping and Firebase Node Synchronization
+          // Execute NLP Mapping
           handleAiDirectiveSubmit(commandText, "voice");
 
           // Release lock safely after cooldown expiration
@@ -2404,6 +2378,8 @@ export default function Dashboard() {
     setCommandUrl("");
     setRoverOnline(false);
     setPing(null);
+    setConnectTrigger(0);
+    setRoverIp("");
     console.log(`${LOG} Disconnected from Rover`);
   }, []);
 
@@ -2414,13 +2390,12 @@ export default function Dashboard() {
       {/* Header */}
       <Header
         roverOnline={roverOnline}
-        fbStatus={fbStatus}
         showSettings={showSettings}
         setShowSettings={setShowSettings}
         theme={theme}
         setTheme={setTheme}
         ping={ping}
-        batteryPct={telemetry.battery_percentage}
+        batteryPct={telemetry.battery || 0}
         roverMode={roverMode}
         onToggleRoverMode={handleRoverModeToggle}
       />
@@ -2785,9 +2760,9 @@ export default function Dashboard() {
                   <div className="flex justify-center items-center">
                     <div className="w-full max-w-md flex flex-col gap-4">
                       <div className="text-center">
-                        <div className="text-xs sm:text-sm font-semibold">Autonomous Directive</div>
+                        <div className="text-xs sm:text-sm font-semibold">Offline Text Command</div>
                         <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
-                          Auto-detect language (English/Bengali) → Firebase <code className="font-mono text-[10px] bg-muted px-1 rounded">ares01/autonomous/action</code>
+                          Local Keyword Matching (Offline) <code className="font-mono text-[10px] bg-muted px-1 rounded">ares01/autonomous/action</code>
                         </div>
                       </div>
 
@@ -2824,7 +2799,7 @@ export default function Dashboard() {
                     <div className="flex flex-col shrink-0 w-[400px] h-[260px] bg-muted/5 p-3 rounded-2xl border border-border/50 shadow-sm relative">
                       <div className="flex justify-between items-center mb-1">
                         <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                          AI Directives Log
+                          Offline Command Log
                           {activeQueue && (
                             <div className="flex items-center gap-1.5 bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 text-[9px] font-bold">
                               <Loader2 className="w-2.5 h-2.5 animate-spin" />

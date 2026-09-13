@@ -26,8 +26,7 @@ export default function EspStudio() {
   const [reader, setReader] = useState<any>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [ssid, setSsid] = useState("");
-  const [password, setPassword] = useState("");
+  
   const [connected, setConnected] = useState(false);
   const [firmwareCode, setFirmwareCode] = useState("Loading firmware source code...");
   const [isFlashing, setIsFlashing] = useState(false);
@@ -217,7 +216,7 @@ export default function EspStudio() {
   const handleFlashConfig = async () => {
     // Pipeline Step 1: Inject WiFi config to NVS if provided
     let activePort = port;
-    if (!activePort && ssid && password) {
+    if (false) {
       try {
         activePort = await navigator.serial.requestPort();
         await activePort.open({ baudRate: 115200 });
@@ -229,12 +228,12 @@ export default function EspStudio() {
       }
     }
 
-    if (activePort && ssid && password) {
+    if (false) {
       try {
         const writer = activePort.writable?.getWriter();
         if (writer) {
           const encoder = new TextEncoder();
-          await writer.write(encoder.encode(`$WIFI:${ssid}:${password}\n`));
+          await writer.write(encoder.encode(`$WIFI::\n`));
           writer.releaseLock();
           toast.success("WiFi credentials injected to NVS.");
           setLogs(prev => [...prev, "[SYSTEM] Config injected via Serial. Awaiting NVS commit..."]);
@@ -279,7 +278,7 @@ export default function EspStudio() {
     setLogs(prev => [...prev, "[SYSTEM] Initiating Embedded USB Flasher..."]);
     
     try {
-      const result = await invoke<string>("flash_firmware", { ssid, pass: password });
+      const result = await invoke<string>("flash_firmware", { ssid: "", pass: "" });
       toast.dismiss();
       toast.success(result || "ESP32 Flashed Successfully!");
       setLogs(prev => [...prev, "[SYSTEM] Flash successful! Rover will now reboot."]);
@@ -322,25 +321,7 @@ export default function EspStudio() {
         <div className="w-1/2 flex flex-col border-r border-white/5 bg-zinc-950">
           {/* Quick Config Card */}
           <div className="p-4 shrink-0 border-b border-white/5">
-            <h2 className="text-xs font-bold text-white/50 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <Wifi className="w-3.5 h-3.5" />
-              Network Configurator
-            </h2>
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <Input 
-                placeholder="WiFi SSID (Optional)" 
-                value={ssid} 
-                onChange={e => setSsid(e.target.value)}
-                className="bg-black/20 border-white/10 text-white placeholder:text-white/30 h-9 text-sm"
-              />
-              <Input 
-                placeholder="WiFi Password (Optional)" 
-                type="password"
-                value={password} 
-                onChange={e => setPassword(e.target.value)}
-                className="bg-black/20 border-white/10 text-white placeholder:text-white/30 h-9 text-sm"
-              />
-            </div>
+            
             <Button 
               onClick={handleFlashConfig}
               className="w-full bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.3)] h-9 text-sm"

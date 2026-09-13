@@ -55,8 +55,6 @@ static const char *TAG_HTTP = "HTTP";
 // NETWORK CONFIGURATION
 const char *ap_ssid = "ARES_01_OFFLINE";
 const char *ap_password = "Admin123";
-char sta_ssid[32] = "ARES_SSID_PLACEHOLDER__________";
-char sta_password[64] = "ARES_PASS_PLACEHOLDER__________________________________________";
 
 WebServer server(80);
 WebSocketsServer webSocket(81);
@@ -505,56 +503,11 @@ void setup() {
   delay(500);
 
   preferences.begin("ares", false);
-  String active_ssid = preferences.getString("ssid", sta_ssid);
-  String active_pass = preferences.getString("pass", sta_password);
-
-  WiFi.mode(WIFI_STA);
-  ESP_LOGI(TAG_WIFI, "Attempting STA connection to %s", active_ssid.c_str());
-  WiFi.begin(active_ssid.c_str(), active_pass.c_str());
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);
-  unsigned long startAttemptTime = millis();
-  bool staConnected = false;
-  while (millis() - startAttemptTime < 15000) {
-    if (WiFi.status() == WL_CONNECTED) {
-      staConnected = true;
-      break;
-    }
-    
-    // Check for Serial injection during setup
-    if (Serial.available()) {
-      String line = Serial.readStringUntil('\n');
-      line.trim();
-      if (line.startsWith("$WIFI:")) {
-        int firstColon = line.indexOf(':');
-        int secondColon = line.indexOf(':', firstColon + 1);
-        if (firstColon > 0 && secondColon > 0) {
-          String new_ssid = line.substring(firstColon + 1, secondColon);
-          String new_pass = line.substring(secondColon + 1);
-          preferences.putString("ssid", new_ssid);
-          preferences.putString("pass", new_pass);
-          Serial.println("[SYSTEM] New WiFi Config Received via Serial during setup! Reconnecting...");
-          WiFi.disconnect(true);
-          WiFi.begin(new_ssid.c_str(), new_pass.c_str());
-          startAttemptTime = millis(); // Reset timeout to wait for new WiFi
-        }
-      }
-    }
-    
-    delay(500);
-  }
-
-  if (staConnected) {
-    ESP_LOGI(TAG_WIFI, "STA Connected! Online Mode Active. IP: %s",
-             WiFi.localIP().toString().c_str());
-  } else {
-    ESP_LOGW(TAG_WIFI,
-             "STA Connection Timeout. Disabling STA and enabling AP.");
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(ap_ssid, ap_password, 6, 0, 4);
-    ESP_LOGI(TAG_WIFI, "Running strictly in Offline AP Mode. IP: %s", WiFi.softAPIP().toString().c_str());
-  }
-
+  // -- 4. NETWORK INITIALIZATION --
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ap_ssid, ap_password, 6, 0, 4);
+  ESP_LOGI(TAG_WIFI, "Running strictly in Offline AP Mode. IP: %s", WiFi.softAPIP().toString().c_str());
+  
   delay(1000);
 
   server.enableCORS(true);
