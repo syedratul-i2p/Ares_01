@@ -204,7 +204,7 @@ const Header = React.memo(function Header({
         <span className="text-gray-500 dark:text-gray-400 text-xs font-medium hidden sm:inline">Rover Mission Control</span>
         <Badge
           variant="outline"
-          className={`text-[10px] h-5 transition-colors duration-500 ${
+          className={`text-xs h-5 transition-colors duration-500 ${
             roverOnline
               ? "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30"
               : "bg-red-500/10 text-red-600 dark:text-red-500 border-red-500/30"
@@ -215,7 +215,7 @@ const Header = React.memo(function Header({
           <span className="sm:hidden">{roverOnline ? "ON" : "OFF"}</span>
         </Badge>
         {ping !== null && (
-          <Badge variant="outline" className="text-[10px] h-5 bg-slate-50 dark:bg-white/5 border-border/30 dark:border-white/5 gap-1.5 font-mono select-none">
+          <Badge variant="outline" className="text-xs h-5 bg-slate-50 dark:bg-white/5 border-border/30 dark:border-white/5 gap-1.5 font-mono select-none">
             <span className={`w-1.5 h-1.5 rounded-full animate-pulse bg-current ${getPingColorClass(ping)}`} />
             <span className={`${getPingColorClass(ping)}`}>{ping}ms</span>
           </Badge>
@@ -226,7 +226,7 @@ const Header = React.memo(function Header({
         <div className="flex items-center p-1 rounded-full bg-slate-200/80 dark:bg-black/40 border border-slate-300/50 dark:border-white/10 shadow-inner relative backdrop-blur-lg">
             <button
               onClick={() => onToggleRoverMode("MANUAL")}
-              className={`relative flex items-center gap-1.5 px-5 py-1.5 rounded-full text-[11px] font-extrabold tracking-widest transition-all duration-300 z-10 ${
+              className={`relative flex items-center gap-1.5 px-5 py-1.5 rounded-full text-sm font-extrabold tracking-widest transition-all duration-300 z-10 ${
                 roverMode === "MANUAL" ? "text-slate-900 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:text-white/40 dark:hover:text-white/70"
               }`}
             >
@@ -243,7 +243,7 @@ const Header = React.memo(function Header({
             
             <button
               onClick={() => onToggleRoverMode("AUTONOMOUS")}
-              className={`relative flex items-center gap-1.5 px-5 py-1.5 rounded-full text-[11px] font-extrabold tracking-widest transition-all duration-300 z-10 ${
+              className={`relative flex items-center gap-1.5 px-5 py-1.5 rounded-full text-sm font-extrabold tracking-widest transition-all duration-300 z-10 ${
                 roverMode === "AUTONOMOUS" ? "text-indigo-700 dark:text-white drop-shadow-sm" : "text-slate-500 hover:text-indigo-600/70 dark:text-white/40 dark:hover:text-white/70"
               }`}
             >
@@ -370,7 +370,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-black/10 dark:border-white/10 shrink-0">
               <div className="flex flex-col">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">System Settings</h2>
-                <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-mono">ARES-01 MISSION CONFIGURATION</span>
+                <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono">ARES-01 MISSION CONFIGURATION</span>
               </div>
               <Button
                 variant="ghost"
@@ -391,13 +391,13 @@ const SettingsPanel = React.memo(function SettingsPanel({
                   <Database className="w-4 h-4 text-primary dark:text-primary shrink-0" />
                   <div className="flex flex-col">
                     <span className="text-xs font-semibold text-slate-900 dark:text-white/90">Rover System Status</span>
-                    <span className="text-[9px] text-slate-500 dark:text-white/40">Active telemetry connection status</span>
+                    <span className="text-[10px] text-slate-500 dark:text-white/40">Active telemetry connection status</span>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   <Badge
                     variant="outline"
-                    className={`text-[9px] h-4.5 font-mono ${
+                    className={`text-[10px] h-4.5 font-mono ${
                       roverOnline
                         ? "bg-green-500/10 text-green-700 dark:text-green-300 border-green-500/20"
                         : "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
@@ -415,7 +415,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                   <Signal className="w-4 h-4 text-primary dark:text-primary shrink-0" />
                   <div className="flex flex-col">
                     <span className="text-xs font-semibold text-slate-900 dark:text-white/90">Network Latency Meter</span>
-                    <span className="text-[9px] text-slate-500 dark:text-white/40">Active round-trip-time heartbeat check</span>
+                    <span className="text-[10px] text-slate-500 dark:text-white/40">Active round-trip-time heartbeat check</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -443,11 +443,11 @@ const SettingsPanel = React.memo(function SettingsPanel({
                   <Signal className="w-4 h-4 text-primary dark:text-primary shrink-0" />
                   <div className="flex flex-col">
                     <span className="text-xs font-semibold text-slate-900 dark:text-white/90">Uplink RSSI</span>
-                    <span className="text-[9px] text-slate-500 dark:text-white/40">Wireless signal strength</span>
+                    <span className="text-[10px] text-slate-500 dark:text-white/40">Wireless signal strength</span>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <span className="text-[10px] font-mono text-primary/80 uppercase">
+                  <span className="text-xs font-mono text-primary/80 uppercase">
                     {rssiValue} dBm ({rssiInfo.label})
                   </span>
                   <div className="flex items-end gap-1 h-3">
@@ -466,12 +466,12 @@ const SettingsPanel = React.memo(function SettingsPanel({
 
               {/* Connections (ESP32-CAM and Command) */}
               <div className="space-y-2.5 pt-1">
-                <span className="text-[10px] font-bold text-[#A0A0A0] uppercase tracking-wider">Hardware Connections</span>
+                <span className="text-xs font-bold text-[#A0A0A0] uppercase tracking-wider">Hardware Connections</span>
                 
                 {/* Unified Rover Connection */}
                 <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-transparent hover:bg-slate-50 dark:hover:bg-[rgba(255,255,255,0.02)] border border-transparent hover:border-slate-200 dark:hover:border-[#333] transition-colors">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-slate-900 dark:text-[#E0E0E0]">Rover IP Address</span>
+                    <span className="text-sm font-semibold text-slate-900 dark:text-[#E0E0E0]">Rover IP Address</span>
                     {streamSrc && !streamError && (
                       <span className="w-1 h-1 rounded-full bg-slate-400" />
                     )}
@@ -479,7 +479,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                   <div className="flex flex-col sm:flex-row gap-2 sm:gap-1.5">
                     <input
                       type="text"
-                      className="h-6 text-[10px] bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
+                      className="h-6 text-xs bg-slate-100 dark:bg-black/20 text-slate-900 dark:text-[#E0E0E0] font-mono flex-1 border border-slate-200 dark:border-[#333] rounded px-1.5 focus:outline-none focus:border-primary/50"
                       placeholder="Enter Rover IP (e.g., 192.168.4.1)"
                       value={roverIp}
                       onChange={e => setRoverIp(e.target.value)}
@@ -488,7 +488,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                     {streamSrc ? (
                       <button
                         onClick={handleDisconnect}
-                        className="w-full sm:w-auto px-2 py-1.5 sm:py-0.5 text-[10px] sm:text-[9px] font-bold rounded border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"
+                        className="w-full sm:w-auto px-2 py-1.5 sm:py-0.5 text-xs sm:text-[10px] font-bold rounded border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all cursor-pointer"
                       >
                         Disconnect
                       </button>
@@ -496,7 +496,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                       <button
                         onClick={handleConnect}
                         disabled={!roverIp.trim()}
-                        className="w-full sm:w-auto px-2.5 py-1.5 sm:py-0.5 text-[10px] sm:text-[9px] font-bold rounded bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground transition-all cursor-pointer border-0"
+                        className="w-full sm:w-auto px-2.5 py-1.5 sm:py-0.5 text-xs sm:text-[10px] font-bold rounded bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground transition-all cursor-pointer border-0"
                       >
                         Connect
                       </button>
@@ -506,7 +506,7 @@ const SettingsPanel = React.memo(function SettingsPanel({
                     <button
                       type="button"
                       onClick={() => setRoverIp("192.168.4.1")}
-                      className="text-[9px] px-2 py-0.5 rounded bg-slate-200 dark:bg-white/10 hover:bg-primary/20 hover:text-primary text-slate-700 dark:text-slate-300 font-mono transition-colors cursor-pointer"
+                      className="text-[10px] px-2 py-0.5 rounded bg-slate-200 dark:bg-white/10 hover:bg-primary/20 hover:text-primary text-slate-700 dark:text-slate-300 font-mono transition-colors cursor-pointer"
                     >
                       ⚡ Offline AP (192.168.4.1)
                     </button>
@@ -521,13 +521,13 @@ const SettingsPanel = React.memo(function SettingsPanel({
                   <RotateCcw className="w-4 h-4 text-[#A0A0A0] shrink-0" />
                   <div className="flex flex-col">
                     <span className="text-xs font-semibold text-slate-900 dark:text-[#E0E0E0]">Firmware Restart</span>
-                    <span className="text-[9px] text-[#A0A0A0]">Remote soft-reboot trigger for ESP32</span>
+                    <span className="text-[10px] text-[#A0A0A0]">Remote soft-reboot trigger for ESP32</span>
                   </div>
                 </div>
                 <button
                   onClick={handleReboot}
                   disabled={rebooting}
-                  className="px-3 py-1.5 text-[9px] font-bold rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary dark:text-primary hover:text-primary/90 disabled:opacity-50 transition-all flex items-center justify-center cursor-pointer shadow-sm min-w-[90px]"
+                  className="px-3 py-1.5 text-[10px] font-bold rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary dark:text-primary hover:text-primary/90 disabled:opacity-50 transition-all flex items-center justify-center cursor-pointer shadow-sm min-w-[90px]"
                 >
                   {rebooting ? (
                     <>
@@ -632,7 +632,7 @@ const CameraView = React.memo(function CameraView({
       <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center rounded-xl overflow-hidden">
         {(isStreamSevered || isRebooting) ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 pointer-events-auto">
-            <div className="w-16 h-16 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mb-4" />
+            <div className="w-24 h-24 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mb-4" />
             <span className="text-indigo-400 font-mono text-xl font-bold tracking-[0.2em] animate-pulse">
               ARES-01 REBOOTING...
             </span>
@@ -706,7 +706,7 @@ const DPad = React.memo(function DPad({
 }: DPadProps) {
   const getButtonClass = (dir: Direction) => {
     const isActive = activeDirection === dir;
-    return `w-14 h-14 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
+    return `w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
       isActive
         ? "scale-90 bg-primary border-2 border-primary text-primary-foreground shadow-inner shadow-black/30 ring-4 ring-primary/30 rounded-xl neon-glow-cyan"
         : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-primary hover:bg-slate-50 hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] text-slate-800 rounded-xl dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:border-primary/50 dark:hover:border-white/30 dark:hover:text-primary"
@@ -715,14 +715,14 @@ const DPad = React.memo(function DPad({
 
   return (
     <div className="flex flex-col items-center justify-between h-full w-full py-1">
-      <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mt-1">Drive Controls</div>
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mt-1">Drive Controls</div>
       <div className="flex flex-col items-center gap-2 select-none mb-1">
         <button
           className={getButtonClass("forward")}
           onMouseDown={() => { onPress("forward"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
           onTouchStart={e => { e.preventDefault(); onPress("forward"); }} onTouchEnd={onRelease}
           data-testid="btn-move-fwd">
-          <ArrowUp className="w-5 h-5 sm:w-6 sm:h-6" />
+          <ArrowUp className="w-8 h-8 sm:w-10 sm:h-10" />
         </button>
         <div className="flex gap-2">
           <button
@@ -730,23 +730,23 @@ const DPad = React.memo(function DPad({
             onMouseDown={() => { onPress("left"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
             onTouchStart={e => { e.preventDefault(); onPress("left"); }} onTouchEnd={onRelease}
             data-testid="btn-move-left">
-            <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
+            <ArrowLeft className="w-8 h-8 sm:w-10 sm:h-10" />
           </button>
           <button
-            className={`w-14 h-14 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
+            className={`w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
               activeDirection === "stop"
                 ? "scale-90 bg-destructive border-2 border-destructive text-destructive-foreground shadow-inner shadow-black/30 ring-4 ring-destructive/30 rounded-xl neon-glow-violet"
                 : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-destructive hover:bg-slate-50 hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] text-destructive rounded-xl dark:border-white/10 dark:bg-transparent dark:hover:border-white/30 dark:text-destructive dark:hover:border-destructive/50"
             }`}
             onClick={() => { onStop(); }} data-testid="btn-move-stop">
-            <Square className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
+            <Square className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />
           </button>
           <button
             className={getButtonClass("right")}
             onMouseDown={() => { onPress("right"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
             onTouchStart={e => { e.preventDefault(); onPress("right"); }} onTouchEnd={onRelease}
             data-testid="btn-move-right">
-            <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6" />
+            <ArrowRight className="w-8 h-8 sm:w-10 sm:h-10" />
           </button>
         </div>
         <button
@@ -754,13 +754,13 @@ const DPad = React.memo(function DPad({
           onMouseDown={() => { onPress("backward"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
           onTouchStart={e => { e.preventDefault(); onPress("backward"); }} onTouchEnd={onRelease}
           data-testid="btn-move-back">
-          <ArrowDown className="w-5 h-5 sm:w-6 sm:h-6" />
+          <ArrowDown className="w-8 h-8 sm:w-10 sm:h-10" />
         </button>
         <div className="h-4">
           <AnimatePresence>
             {activeDirection && (
               <motion.span key={activeDirection} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                className="text-[10px] font-mono font-semibold text-primary uppercase tracking-widest" data-testid="text-active-direction">
+                className="text-xs font-mono font-semibold text-primary uppercase tracking-widest" data-testid="text-active-direction">
                 ▶ {activeDirection}
               </motion.span>
             )}
@@ -969,7 +969,7 @@ const ArmControls = React.memo(function ArmControls({
   return (
     <div className="arm-controls-wrapper flex flex-col gap-1.5 py-0.5">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">5DOF Arm Control</div>
+        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">5DOF Arm Control</div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"
             onClick={handleResetArm} data-testid="btn-arm-reset">
@@ -983,7 +983,7 @@ const ArmControls = React.memo(function ArmControls({
           const isActive = joints.base === p.joints.base && joints.shoulder === p.joints.shoulder && joints.elbow === p.joints.elbow && joints.wrist === p.joints.wrist && joints.gripper === p.joints.gripper;
           return (
             <button key={p.name} onClick={() => { applyPreset(p); }}
-              className={`text-[11px] py-1.5 px-1 rounded-md border transition-all duration-300 ease-out font-semibold cursor-pointer active:scale-95 shadow-sm ${
+              className={`text-sm py-1.5 px-1 rounded-md border transition-all duration-300 ease-out font-semibold cursor-pointer active:scale-95 shadow-sm ${
                 isActive 
                   ? "bg-primary text-primary-foreground border-primary shadow-[0_0_15px_rgba(var(--primary),0.5)] scale-105" 
                   : "bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/20 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 hover:border-primary dark:hover:border-primary hover:text-primary dark:hover:text-primary hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)]"
@@ -1008,7 +1008,7 @@ const ArmControls = React.memo(function ArmControls({
                 {/* Left Column: Label & Dot */}
                 <div className="flex items-center gap-2 md:w-[75px] shrink-0">
                   <span className={`w-2 h-2 rounded-full shrink-0 shadow-[0_0_8px_currentColor]`} style={{ color: cfg.color, backgroundColor: cfg.color }} />
-                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{cfg.label}</span>
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">{cfg.label}</span>
                 </div>
 
                 {/* Center Column: Directional Buttons */}
@@ -1024,10 +1024,10 @@ const ArmControls = React.memo(function ArmControls({
                         setActiveDirection(null);
                         sendArmCommand("stop");
                     }}
-                    className="h-8 w-12 md:h-7 md:w-14 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
+                    className="h-10 w-16 md:h-12 md:w-20 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
                     data-testid={`btn-arm-${key}-dec`}>
                     {key === "base" ? <ArrowLeft className="w-5 h-5 md:w-4 md:h-4 text-slate-300" /> : 
-                     key === "gripper" ? <span className="text-[9px] font-bold tracking-widest text-slate-300">OPEN</span> : 
+                     key === "gripper" ? <span className="text-xs md:text-sm font-bold tracking-widest text-slate-300">OPEN</span> : 
                      <ArrowDown className="w-5 h-5 md:w-4 md:h-4 text-slate-300" />}
                   </ContinuousButton>
                   
@@ -1042,10 +1042,10 @@ const ArmControls = React.memo(function ArmControls({
                         setActiveDirection(null);
                         sendArmCommand("stop");
                     }}
-                    className="h-8 w-12 md:h-7 md:w-14 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
+                    className="h-10 w-16 md:h-12 md:w-20 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
                     data-testid={`btn-arm-${key}-inc`}>
                     {key === "base" ? <ArrowRight className="w-5 h-5 md:w-4 md:h-4 text-slate-300" /> : 
-                     key === "gripper" ? <span className="text-[9px] font-bold tracking-widest text-slate-300">CLOSE</span> : 
+                     key === "gripper" ? <span className="text-xs md:text-sm font-bold tracking-widest text-slate-300">CLOSE</span> : 
                      <ArrowUp className="w-5 h-5 md:w-4 md:h-4 text-slate-300" />}
                   </ContinuousButton>
                 </div>
@@ -1055,7 +1055,7 @@ const ArmControls = React.memo(function ArmControls({
         </div>
       </div>
       <button
-        className="arm-reset-bottom w-full mt-1 text-xs gap-1.5 h-7 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-foreground transition-all flex items-center justify-center cursor-pointer shadow-md active:scale-98"
+        className="arm-reset-bottom w-full mt-2 text-sm md:text-base gap-2 h-10 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-foreground transition-all flex items-center justify-center cursor-pointer shadow-md active:scale-98"
         onClick={handleResetArm}
         data-testid="btn-arm-reset-bottom"
       >
@@ -2525,188 +2525,58 @@ export default function Dashboard() {
         
         {/* LEFT COLUMN: Camera View Section */}
         <div className="w-full lg:w-[55%] flex-shrink-0 flex flex-col relative bg-transparent z-10 h-[50vh] lg:h-full border-b lg:border-b-0 lg:border-r border-border/50">
-        <style>{`
-          @keyframes geminiGradient {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-          }
-          @keyframes float1 {
-            0% { transform: translate(0px, 0px) scale(1); }
-            33% { transform: translate(30px, -20px) scale(1.1); }
-            66% { transform: translate(-20px, 15px) scale(0.95); }
-            100% { transform: translate(0px, 0px) scale(1); }
-          }
-          @keyframes float2 {
-            0% { transform: translate(0px, 0px) scale(1.05); }
-            50% { transform: translate(-30px, 25px) scale(0.95); }
-            100% { transform: translate(0px, 0px) scale(1.05); }
-          }
-          .gemini-bg {
-            background: linear-gradient(-45deg, #0f0c20, #15103c, #051c2c, #1f0b2a, #0c152a);
-            background-size: 300% 300%;
-            animation: geminiGradient 16s ease infinite;
-          }
-          .float-blob-1 {
-            animation: float1 18s ease-in-out infinite;
-          }
-          .float-blob-2 {
-            animation: float2 22s ease-in-out infinite;
-          }
-          @keyframes progressGlow {
-            0% { left: -50%; }
-            100% { left: 100%; }
-          }
-          .animate-progress-glow {
-            position: absolute;
-            height: 100%;
-            animation: progressGlow 1.2s linear infinite;
-          }
-          .mjpeg-gpu-layer {
-            transform: translate3d(0, 0, 0);
-            backface-visibility: hidden;
-            will-change: transform;
-            image-rendering: pixelated;
-            image-rendering: crisp-edges;
-            rendering-intent: relative-colorimetric;
-          }
-          @media (min-width: 1024px) {
-            .desktop-camera-feed {
-               max-height: 55vh !important;
-               aspect-ratio: 16/9 !important;
-               object-fit: contain !important;
+        <style>{
+            @keyframes geminiGradient {
+              0% { background-position: 0% 50%; }
+              50% { background-position: 100% 50%; }
+              100% { background-position: 0% 50%; }
             }
-            button, a, input[type="range"], .dpad-button, .arm-slider-control-row button, .joint-slider {
-               user-select: none !important;
-               -webkit-user-select: none !important;
+            @keyframes float1 {
+              0% { transform: translate(0px, 0px) scale(1); }
+              33% { transform: translate(30px, -20px) scale(1.1); }
+              66% { transform: translate(-20px, 15px) scale(0.95); }
+              100% { transform: translate(0px, 0px) scale(1); }
             }
-          }
-          @media (max-width: 768px) {
-            /* 1. Macro Layout Re-stacking: Centered vertical column stack */
-            .your-main-control-container { 
-               display: flex !important;
-               flex-direction: column !important; /* Revert to vertical stack */
-               justify-content: flex-start !important;
-               align-items: center !important;
-               width: 100% !important;
-               overflow: hidden !important;
-               gap: 6px !important;
-               padding-top: 2px !important;
-               padding-bottom: 2px !important;
+            @keyframes float2 {
+              0% { transform: translate(0px, 0px) scale(1.05); }
+              50% { transform: translate(-30px, 25px) scale(0.95); }
+              100% { transform: translate(0px, 0px) scale(1.05); }
             }
-            .drive-control-section {
-               width: 100% !important;
-               display: flex !important;
-               justify-content: center !important;
-               align-items: center !important;
+            .gemini-bg {
+              background: linear-gradient(-45deg, #0f0c20, #15103c, #051c2c, #1f0b2a, #0c152a);
+              background-size: 300% 300%;
+              animation: geminiGradient 16s ease infinite;
             }
-            .arm-control-section {
-               width: 100% !important;
-               max-width: 450px !important;
-               display: flex !important;
-               justify-content: center !important;
-               align-items: center !important;
+            .float-blob-1 {
+              animation: float1 18s ease-in-out infinite;
             }
-
-            /* 2. Micro Layout Refactoring: Side-by-side canvas and sliders inside Arm Control */
-            .arm-controls-wrapper {
-               gap: 4px !important;
-               width: 100% !important;
+            .float-blob-2 {
+              animation: float2 22s ease-in-out infinite;
             }
-            .arm-canvas-sliders-flex {
-               display: flex !important;
-               flex-direction: row !important; /* Horizontal side-by-side row configuration */
-               align-items: center !important;
-               justify-content: space-between !important;
-               width: 100% !important;
-               gap: 8px !important;
-               padding: 4px !important;
+            @keyframes progressGlow {
+              0% { box-shadow: 0 0 10px rgba(168,85,247,0.5), inset 0 0 10px rgba(168,85,247,0.5); }
+              50% { box-shadow: 0 0 20px rgba(168,85,247,0.8), inset 0 0 20px rgba(168,85,247,0.8); }
+              100% { box-shadow: 0 0 10px rgba(168,85,247,0.5), inset 0 0 10px rgba(168,85,247,0.5); }
             }
-            .arm-canvas-wrapper {
-               width: 120px !important;
-               height: 74px !important;
-               flex-shrink: 0 !important;
+            .progress-glow {
+              animation: progressGlow 2s infinite;
             }
-            .arm-canvas-wrapper canvas {
-               width: 120px !important;
-               height: 74px !important;
+            .dpad-button {
+              box-shadow: inset 0 2px 5px rgba(255,255,255,0.1), 0 4px 10px rgba(0,0,0,0.5);
+              transition: all 0.1s;
             }
-            .arm-sliders-container {
-               flex: 1 !important;
-               width: auto !important;
-               display: flex !important;
-               flex-direction: column !important;
-               gap: 2px !important;
-               margin-top: 0px !important;
+            .dpad-button:active {
+              box-shadow: inset 0 1px 2px rgba(0,0,0,0.8), 0 2px 5px rgba(0,0,0,0.5);
+              transform: translateY(2px);
             }
-
-            /* 3. Slider Row Adjustments (tight horizontal matching) */
-            .arm-slider-row {
-               display: flex !important;
-               flex-direction: row !important; /* Labels and sliders match tightly on right side */
-               align-items: center !important;
-               justify-content: space-between !important;
-               width: 100% !important;
-               padding: 1.5px 0 !important;
-               border-bottom: 0 !important;
-               gap: 4px !important;
-            }
-            .arm-slider-label-row {
-               width: 62px !important; /* Fixed tight label/value column */
-               display: flex !important;
-               justify-content: space-between !important;
-               align-items: center !important;
-               flex-shrink: 0 !important;
-            }
-            .arm-slider-label-row span {
-               font-size: 8.5px !important;
-            }
-            .arm-slider-control-row {
-               display: flex !important;
-               align-items: center !important;
-               gap: 4px !important;
-               flex: 1 !important;
-            }
-            .arm-slider-control-row button {
-               width: 16px !important;
-               height: 16px !important;
-               font-size: 8px !important;
-               padding: 0 !important;
-               display: flex !important;
-               align-items: center !important;
-               justify-content: center !important;
-            }
-            .joint-slider {
-               height: 6px !important;
-               flex: 1 !important;
-            }
-
-            /* Additional scaling and scroll prevention */
-            .arm-presets-grid {
-               gap: 2px !important;
-            }
-            .arm-presets-grid button {
-               font-size: 8px !important;
-               padding: 2px 1px !important;
-            }
-            .arm-reset-bottom {
-               margin-top: 2px !important;
-               height: 20px !important;
-               font-size: 9px !important;
-               padding: 0 !important;
-            }
-
             /* Disable body scroll completely for the app feel */
             body, html { overflow: hidden !important; touch-action: none; }
-
-            /* 4. Touch Interactions and Bounding Boxes */
             button, a, input[type="range"] {
                touch-action: manipulation !important;
             }
             .arm-slider-control-row button, .arm-presets-grid button, .arm-reset-bottom, .dpad-button {
                position: relative;
             }
-            /* Expand touch targets to 48x48px */
             .arm-slider-control-row button::after, .arm-presets-grid button::after, .arm-reset-bottom::after, .dpad-button::after {
                content: '';
                position: absolute;
@@ -2718,14 +2588,7 @@ export default function Dashboard() {
                z-index: 10;
                pointer-events: auto;
             }
-            /* Visual feedback on active/hover for touch */
-            button:active, .dpad-button:active {
-               transform: scale(0.95);
-               opacity: 0.8;
-               transition: all 0.05s ease-out;
-            }
-          }
-        `}</style>
+}</style>
 
         {/* Central Widescreen Camera Frame */}
         <div className="flex-[1] w-[98%] mx-auto flex flex-row justify-between items-end pb-2">
@@ -2861,8 +2724,8 @@ export default function Dashboard() {
                     <div className="w-full max-w-md flex flex-col gap-4">
                       <div className="text-center">
                         <div className="text-xs sm:text-sm font-semibold">Offline Text Command</div>
-                        <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
-                          Local Keyword Matching (Offline) <code className="font-mono text-[10px] bg-muted px-1 rounded">ares01/autonomous/action</code>
+                        <div className="text-xs sm:text-xs text-muted-foreground mt-0.5">
+                          Local Keyword Matching (Offline) <code className="font-mono text-xs bg-muted px-1 rounded">ares01/autonomous/action</code>
                         </div>
                       </div>
 
@@ -2886,7 +2749,7 @@ export default function Dashboard() {
                       <div className="flex flex-wrap gap-1 justify-center max-h-[48px] overflow-y-auto">
                         {["pick ball", "drop target", "home position"].map(chip => (
                           <button key={chip} onClick={() => setDirectiveInput(chip)}
-                            className="text-[9px] px-2.5 py-1 rounded-full border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-all font-medium cursor-pointer">
+                            className="text-[10px] px-2.5 py-1 rounded-full border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-all font-medium cursor-pointer">
                             {chip}
                           </button>
                         ))}
@@ -2898,10 +2761,10 @@ export default function Dashboard() {
                   <div className="w-full max-w-[400px] flex justify-center shrink-0">
                     <div className="flex flex-col shrink-0 w-[400px] h-[260px] bg-muted/5 p-3 rounded-2xl border border-border/50 shadow-sm relative">
                       <div className="flex justify-between items-center mb-1">
-                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                           Offline Command Log
                           {activeQueue && (
-                            <div className="flex items-center gap-1.5 bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 text-[9px] font-bold">
+                            <div className="flex items-center gap-1.5 bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 text-[10px] font-bold">
                               <Loader2 className="w-2.5 h-2.5 animate-spin" />
                               <span>STEP {activeQueue.index}/{activeQueue.total}: {activeQueue.command}</span>
                             </div>
@@ -2909,7 +2772,7 @@ export default function Dashboard() {
                         </div>
                         <div className="flex items-center justify-between h-4">
                           {isProcessing ? (
-                            <div className="flex items-center gap-1 text-[9px] font-mono text-primary font-semibold tracking-wider animate-pulse">
+                            <div className="flex items-center gap-1 text-[10px] font-mono text-primary font-semibold tracking-wider animate-pulse">
                               <Loader2 className="w-2.5 h-2.5 animate-spin" />
                               <span>AI PROCESSING...</span>
                             </div>
@@ -3012,7 +2875,7 @@ export default function Dashboard() {
                   <div className="w-full max-w-[400px] flex justify-center shrink-0">
                     <div className="flex flex-col shrink-0 w-[400px] h-[260px] bg-muted/5 p-3 rounded-2xl border border-border/50 shadow-sm relative">
                       <div className="flex justify-between items-center mb-1">
-                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Voice Commands Log</div>
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Voice Commands Log</div>
                         <div className="flex items-center justify-between h-4">
                           <div className="text-[8.5px] font-mono text-muted-foreground">
                             AUDIO SYSTEM ACTIVE
