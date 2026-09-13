@@ -2525,7 +2525,7 @@ export default function Dashboard() {
         
         {/* LEFT COLUMN: Camera View Section */}
         <div className="w-full lg:w-[55%] flex-shrink-0 flex flex-col relative bg-transparent z-10 h-[50vh] lg:h-full border-b lg:border-b-0 lg:border-r border-border/50">
-        <style>{
+        <style>{`
             @keyframes geminiGradient {
               0% { background-position: 0% 50%; }
               50% { background-position: 100% 50%; }
@@ -2587,8 +2587,8 @@ export default function Dashboard() {
                transform: translate(-50%, -50%);
                z-index: 10;
                pointer-events: auto;
-            }
-}</style>
+             }
+        `}</style>
 
         {/* Central Widescreen Camera Frame */}
         <div className="flex-[1] w-[98%] mx-auto flex flex-row justify-between items-end pb-2">
