@@ -706,7 +706,7 @@ const DPad = React.memo(function DPad({
 }: DPadProps) {
   const getButtonClass = (dir: Direction) => {
     const isActive = activeDirection === dir;
-    return `w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
+    return `w-14 h-14 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
       isActive
         ? "scale-90 bg-primary border-2 border-primary text-primary-foreground shadow-inner shadow-black/30 ring-4 ring-primary/30 rounded-xl neon-glow-cyan"
         : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-primary hover:bg-slate-50 hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] text-slate-800 rounded-xl dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:border-primary/50 dark:hover:border-white/30 dark:hover:text-primary"
@@ -722,7 +722,7 @@ const DPad = React.memo(function DPad({
           onMouseDown={() => { onPress("forward"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
           onTouchStart={e => { e.preventDefault(); onPress("forward"); }} onTouchEnd={onRelease}
           data-testid="btn-move-fwd">
-          <ArrowUp className="w-8 h-8 sm:w-10 sm:h-10" />
+          <ArrowUp className="w-5 h-5 sm:w-6 sm:h-6" />
         </button>
         <div className="flex gap-2">
           <button
@@ -730,23 +730,23 @@ const DPad = React.memo(function DPad({
             onMouseDown={() => { onPress("left"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
             onTouchStart={e => { e.preventDefault(); onPress("left"); }} onTouchEnd={onRelease}
             data-testid="btn-move-left">
-            <ArrowLeft className="w-8 h-8 sm:w-10 sm:h-10" />
+            <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
           <button
-            className={`w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
+            className={`w-14 h-14 sm:w-14 sm:h-14 flex items-center justify-center cursor-pointer transition-all duration-300 ease-out active:scale-95 ${
               activeDirection === "stop"
                 ? "scale-90 bg-destructive border-2 border-destructive text-destructive-foreground shadow-inner shadow-black/30 ring-4 ring-destructive/30 rounded-xl neon-glow-violet"
                 : "border-2 border-slate-300 shadow-[0_3px_10px_rgba(0,0,0,0.03)] bg-white hover:border-destructive hover:bg-slate-50 hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] text-destructive rounded-xl dark:border-white/10 dark:bg-transparent dark:hover:border-white/30 dark:text-destructive dark:hover:border-destructive/50"
             }`}
             onClick={() => { onStop(); }} data-testid="btn-move-stop">
-            <Square className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />
+            <Square className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
           </button>
           <button
             className={getButtonClass("right")}
             onMouseDown={() => { onPress("right"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
             onTouchStart={e => { e.preventDefault(); onPress("right"); }} onTouchEnd={onRelease}
             data-testid="btn-move-right">
-            <ArrowRight className="w-8 h-8 sm:w-10 sm:h-10" />
+            <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
         </div>
         <button
@@ -754,7 +754,7 @@ const DPad = React.memo(function DPad({
           onMouseDown={() => { onPress("backward"); }} onMouseUp={onRelease} onMouseLeave={onRelease}
           onTouchStart={e => { e.preventDefault(); onPress("backward"); }} onTouchEnd={onRelease}
           data-testid="btn-move-back">
-          <ArrowDown className="w-8 h-8 sm:w-10 sm:h-10" />
+          <ArrowDown className="w-5 h-5 sm:w-6 sm:h-6" />
         </button>
         <div className="h-4">
           <AnimatePresence>
@@ -983,7 +983,7 @@ const ArmControls = React.memo(function ArmControls({
           const isActive = joints.base === p.joints.base && joints.shoulder === p.joints.shoulder && joints.elbow === p.joints.elbow && joints.wrist === p.joints.wrist && joints.gripper === p.joints.gripper;
           return (
             <button key={p.name} onClick={() => { applyPreset(p); }}
-              className={`text-sm py-1.5 px-1 rounded-md border transition-all duration-300 ease-out font-semibold cursor-pointer active:scale-95 shadow-sm ${
+              className={`text-[11px] py-1.5 px-1 rounded-md border transition-all duration-300 ease-out font-semibold cursor-pointer active:scale-95 shadow-sm ${
                 isActive 
                   ? "bg-primary text-primary-foreground border-primary shadow-[0_0_15px_rgba(var(--primary),0.5)] scale-105" 
                   : "bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/20 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 hover:border-primary dark:hover:border-primary hover:text-primary dark:hover:text-primary hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)]"
@@ -1024,10 +1024,10 @@ const ArmControls = React.memo(function ArmControls({
                         setActiveDirection(null);
                         sendArmCommand("stop");
                     }}
-                    className="h-10 w-16 md:h-12 md:w-20 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
+                    className="h-8 w-12 md:h-7 md:w-14 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
                     data-testid={`btn-arm-${key}-dec`}>
                     {key === "base" ? <ArrowLeft className="w-5 h-5 md:w-4 md:h-4 text-slate-300" /> : 
-                     key === "gripper" ? <span className="text-xs md:text-sm font-bold tracking-widest text-slate-300">OPEN</span> : 
+                     key === "gripper" ? <span className="text-[10px] font-bold tracking-widest text-slate-300">OPEN</span> : 
                      <ArrowDown className="w-5 h-5 md:w-4 md:h-4 text-slate-300" />}
                   </ContinuousButton>
                   
@@ -1042,10 +1042,10 @@ const ArmControls = React.memo(function ArmControls({
                         setActiveDirection(null);
                         sendArmCommand("stop");
                     }}
-                    className="h-10 w-16 md:h-12 md:w-20 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
+                    className="h-8 w-12 md:h-7 md:w-14 shrink-0 rounded-md border border-white/10 bg-slate-950/50 hover:bg-white/10 hover:border-white/30 hover:scale-105 active:scale-90 transition-all duration-300 ease-out flex items-center justify-center shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_15px_rgba(255,255,255,0.05)]"
                     data-testid={`btn-arm-${key}-inc`}>
                     {key === "base" ? <ArrowRight className="w-5 h-5 md:w-4 md:h-4 text-slate-300" /> : 
-                     key === "gripper" ? <span className="text-xs md:text-sm font-bold tracking-widest text-slate-300">CLOSE</span> : 
+                     key === "gripper" ? <span className="text-[10px] font-bold tracking-widest text-slate-300">CLOSE</span> : 
                      <ArrowUp className="w-5 h-5 md:w-4 md:h-4 text-slate-300" />}
                   </ContinuousButton>
                 </div>
@@ -1055,7 +1055,7 @@ const ArmControls = React.memo(function ArmControls({
         </div>
       </div>
       <button
-        className="arm-reset-bottom w-full mt-2 text-sm md:text-base gap-2 h-10 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-foreground transition-all flex items-center justify-center cursor-pointer shadow-md active:scale-98"
+        className="arm-reset-bottom w-full mt-1 text-xs gap-1.5 h-7 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-foreground transition-all flex items-center justify-center cursor-pointer shadow-md active:scale-98"
         onClick={handleResetArm}
         data-testid="btn-arm-reset-bottom"
       >
