@@ -2059,8 +2059,8 @@ export default function Dashboard() {
     const durationSec = numMatch ? parseFloat(numMatch[1]) : 0;
 
     // 2. Sequential Autonomous Macro: "সামনে গিয়ে তোল" / "forward and pick"
-    const hasDriveKeyword = ['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead'].some(k => lowerText.includes(k));
-    const hasPickKeyword = ['তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab'].some(k => lowerText.includes(k));
+    const hasDriveKeyword = ['সামনে', 'আগা', 'এগিয়ে', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye'].some(k => lowerText.includes(k));
+    const hasPickKeyword = ['তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tulo', 'tolo', 'uthao', 'dhoro', 'nao', 'pikap'].some(k => lowerText.includes(k));
 
     if (hasDriveKeyword && hasPickKeyword) {
       const driveDuration = durationSec > 0 ? durationSec * 1000 : 2000;
@@ -2146,11 +2146,11 @@ export default function Dashboard() {
       appendLog(`[${timestamp}] [ARM] Inverse kinematics resolved. Actuating manipulator: PICKUP.`);
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    } else if (['ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'drop', 'releas'].some(k => lowerText.includes(k))) {
-      appendLog(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
-      setJoints(prev => ({ ...prev, gripper: 90 }));
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset'].some(k => lowerText.includes(k))) {
+      } else if (['ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo'].some(k => lowerText.includes(k))) {
+        appendLog(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
+        setJoints(prev => ({ ...prev, gripper: 90 }));
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+      } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal'].some(k => lowerText.includes(k))) {
       appendLog(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });

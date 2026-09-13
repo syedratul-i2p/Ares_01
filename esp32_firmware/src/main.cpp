@@ -95,6 +95,24 @@ void executeHardwareCommand(String mode, String action, String direction,
   } else if (action == "arm_control") {
     Hardware.setArmMotor(joint, direction, angle);
     return;
+  } else if (action == "arm_macro") {
+    direction.toUpperCase();
+    if (direction == "PICKUP") {
+      Hardware.setArmMotor("base", "", 90);
+      Hardware.setArmMotor("shoulder", "", 45);
+      Hardware.setArmMotor("elbow", "", 120);
+      Hardware.setArmMotor("wrist", "", 90);
+      Hardware.setArmMotor("gripper", "", 180);
+    } else if (direction == "DROP") {
+      Hardware.setArmMotor("gripper", "", 90);
+    } else if (direction == "HOME" || direction == "RESET") {
+      Hardware.setArmMotor("base", "", 90);
+      Hardware.setArmMotor("shoulder", "", 90);
+      Hardware.setArmMotor("elbow", "", 90);
+      Hardware.setArmMotor("wrist", "", 90);
+      Hardware.setArmMotor("gripper", "", 90);
+    }
+    return;
   }
 }
 
@@ -147,11 +165,11 @@ void handleCommand() {
     return;
   }
 
-  if (action == "drive") {
+  if (action == "drive" || action == "arm_macro") {
     executeHardwareCommand(mode, action, direction, speed, joint, angle);
     doc.clear();
     server.send(200, "application/json",
-                "{\"status\":\"success\", \"message\":\"Drive Executed\"}");
+                "{\"status\":\"success\", \"message\":\"Command Executed\"}");
     return;
   }
 
@@ -296,7 +314,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload,
         } else if (action == "arm_control" && angle != -1) {
           Hardware.setArmMotor(joint, "", angle);
         }
-      } else if (action == "drive" || action == "arm_control") {
+      } else if (action == "drive" || action == "arm_control" || action == "arm_macro") {
         executeHardwareCommand(mode, action, direction, speed, joint, angle);
       }
     } else {
