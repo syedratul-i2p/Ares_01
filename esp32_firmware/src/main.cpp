@@ -518,10 +518,11 @@ void setup() {
   ESP_LOGI(TAG_SYS, "Booting Advanced ESP32-S3 Firmware...");
 
   // Clear corrupt NVS WiFi cache to prevent AP/STA password rejection
-  WiFi.disconnect(true, true);
-  vTaskDelay(pdMS_TO_TICKS(100));
+  WiFi.persistent(false); // Don't write to flash on every boot
+  WiFi.disconnect(true);
+  vTaskDelay(pdMS_TO_TICKS(50));
   WiFi.mode(WIFI_MODE_NULL);
-  vTaskDelay(pdMS_TO_TICKS(100));
+  vTaskDelay(pdMS_TO_TICKS(50));
 
   WiFi.setSleep(false);
   WiFi.setTxPower(WIFI_POWER_8_5dBm); // Limit TX power to prevent brownouts!
@@ -633,6 +634,29 @@ void setup() {
   server.begin();
   streamServer.begin();
   webSocket.begin();
+  webSocket.enableHeartbeat(15000, 4000, 3);
+  webSocket.onEvent(webSocketEvent);
+  ESP_LOGI(TAG_SYS, "Web Servers and WebSocket Server Started.");
+
+    // Create API Task (WebSockets) on Core 1 with HIGH Priority (2) for instant response
+    xTaskCreatePinnedToCore(
+      [](void *pvParameters) {
+        for (;;) {
+          webSocket.loop();
+          server.handleClient();
+          vTaskDelay(pdMS_TO_TICKS(5)); // Prevent starvation
+        }
+      },
+      "API_Task", 8192, NULL, 2, NULL, 1); 
+
+  // Create Stream Task on Core 1 with LOW Priority (1) so it doesn't starve WebSockets
+  xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 1,
+                          &streamTaskHandle, 1);
+  
+  // Create Control Task on Core 1 with HIGH Priority (2) for instant motor I2C commands
+  xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 2,
+                          &controlTaskHandle, 1); 
+  ESP_LOGI(TAG_SYS, "FreeRTOS Dual-Core Architecture initialized!");
 }
 
 void loop() { vTaskDelete(NULL); }
