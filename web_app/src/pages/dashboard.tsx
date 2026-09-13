@@ -585,7 +585,7 @@ const CameraView = React.memo(function CameraView({
       for (let entry of entries) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
-          setAspectScale(Math.max(width / height, height / width));
+          setAspectScale(Math.min(width / height, height / width));
         }
       }
     });
@@ -608,7 +608,7 @@ const CameraView = React.memo(function CameraView({
             key={streamKey}
             src={isStreamSevered || isRebooting ? "" : `${streamSrc}&t=${streamKey}`} 
             alt="ARES-01 live feed"
-            className="w-full h-full object-cover rounded-xl pointer-events-none select-none"
+            className="w-full h-full object-contain rounded-xl pointer-events-none select-none"
             style={{ display: streamError || !roverOnline || isStreamSevered || isRebooting ? 'none' : 'block' }}
             onLoad={() => {
               retryCountRef.current = 0;
