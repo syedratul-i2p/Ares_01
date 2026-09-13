@@ -2240,10 +2240,24 @@ export default function Dashboard() {
       appendLog(`[${timestamp}] [ARM] Inverse kinematics resolved. Actuating manipulator: PICKUP.`);
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+      
+      // Auto-stop DC motors after 1 second
+      setTimeout(() => {
+        setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
+      }, 1200);
+
     } else if (hasDropKeyword) {
       appendLog(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
       setJoints(prev => ({ ...prev, gripper: 90 }));
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+      
+      // Auto-stop DC motors after 1 second
+      setTimeout(() => {
+        setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
+      }, 1200);
+
     } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal'].some(k => lowerText.includes(k))) {
       appendLog(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });

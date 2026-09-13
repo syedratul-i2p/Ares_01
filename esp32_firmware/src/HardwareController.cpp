@@ -55,12 +55,12 @@ void HardwareController::setMotorState(Adafruit_PWMServoDriver &pca, int pwmPin,
     int MIN_PWM = 3800; 
 
     if (uiValue > 91) {
-        // Map 91-180 strictly to MIN_PWM-4096
-        speed = map(uiValue, 91, 180, MIN_PWM, 4096);
+        // Map 91-180 strictly to MIN_PWM-4095 (4096 causes Adafruit library to trigger FULL OFF bit)
+        speed = map(uiValue, 91, 180, MIN_PWM, 4095);
         dirForward = true;
     } else if (uiValue < 89) {
-        // Map 89-0 strictly to MIN_PWM-4096
-        speed = map(uiValue, 89, 0, MIN_PWM, 4096);
+        // Map 89-0 strictly to MIN_PWM-4095
+        speed = map(uiValue, 89, 0, MIN_PWM, 4095);
         dirForward = false;
     } else {
         // Strict Deadband for 89, 90, 91
