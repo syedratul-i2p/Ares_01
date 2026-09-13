@@ -73,6 +73,71 @@ static const char *_STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
 static const char *_STREAM_PART =
     "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
+TaskHandle_t macroTaskHandle = NULL;
+
+void pickupMacroTask(void *pvParameters) {
+  // Phase 1: Open gripper and move arm down
+  Hardware.setArmMotor("gripper", "", 180); // Open
+  Hardware.setArmMotor("shoulder", "", 0);  // Down
+  Hardware.setArmMotor("elbow", "", 0);     // Down
+  vTaskDelay(pdMS_TO_TICKS(1800)); 
+
+  // Phase 2: Stop arm descent, ensure gripper is fully open
+  Hardware.setArmMotor("shoulder", "", 90); // Stop
+  Hardware.setArmMotor("elbow", "", 90);    // Stop
+  vTaskDelay(pdMS_TO_TICKS(1000));
+  Hardware.setArmMotor("gripper", "", 90);  // Stop gripper open
+
+  // Phase 3: Close gripper to pick up
+  Hardware.setArmMotor("gripper", "", 0);   // Close
+  vTaskDelay(pdMS_TO_TICKS(2000));
+  Hardware.setArmMotor("gripper", "", 90);  // Stop closing
+
+  // Phase 4: Raise arm back up
+  Hardware.setArmMotor("shoulder", "", 180); // Up
+  Hardware.setArmMotor("elbow", "", 180);    // Up
+  vTaskDelay(pdMS_TO_TICKS(2000));
+
+  // Phase 5: Stop all (Home)
+  Hardware.setArmMotor("base", "", 90);
+  Hardware.setArmMotor("shoulder", "", 90);
+  Hardware.setArmMotor("elbow", "", 90);
+  Hardware.setArmMotor("wrist", "", 90);
+  Hardware.setArmMotor("gripper", "", 90);
+  
+  macroTaskHandle = NULL;
+  vTaskDelete(NULL);
+}
+
+void dropMacroTask(void *pvParameters) {
+  // Phase 1: Lower arm slightly
+  Hardware.setArmMotor("shoulder", "", 0);
+  Hardware.setArmMotor("elbow", "", 0);
+  vTaskDelay(pdMS_TO_TICKS(1200));
+  Hardware.setArmMotor("shoulder", "", 90);
+  Hardware.setArmMotor("elbow", "", 90);
+
+  // Phase 2: Open gripper to drop
+  Hardware.setArmMotor("gripper", "", 180); // Open
+  vTaskDelay(pdMS_TO_TICKS(1500));
+  Hardware.setArmMotor("gripper", "", 90);  // Stop gripper
+
+  // Phase 3: Raise arm back up
+  Hardware.setArmMotor("shoulder", "", 180);
+  Hardware.setArmMotor("elbow", "", 180);
+  vTaskDelay(pdMS_TO_TICKS(1200));
+
+  // Phase 4: Stop all
+  Hardware.setArmMotor("base", "", 90);
+  Hardware.setArmMotor("shoulder", "", 90);
+  Hardware.setArmMotor("elbow", "", 90);
+  Hardware.setArmMotor("wrist", "", 90);
+  Hardware.setArmMotor("gripper", "", 90);
+
+  macroTaskHandle = NULL;
+  vTaskDelete(NULL);
+}
+
 void executeHardwareCommand(String mode, String action, String direction,
                             int speed, String joint, int angle) {
   ESP_LOGI(TAG_SYS,
@@ -94,23 +159,28 @@ void executeHardwareCommand(String mode, String action, String direction,
       Hardware.drive(0, 0);
     return;
   } else if (action == "arm_control") {
+    // If manual control is used, cancel any running macro
+    if (macroTaskHandle != NULL) { vTaskDelete(macroTaskHandle); macroTaskHandle = NULL; }
     Hardware.setArmMotor(joint, direction, angle);
     return;
   } else if (action == "arm_macro") {
     direction.toUpperCase();
+    
     if (direction == "PICKUP") {
-      Hardware.setArmMotor("base", "", 90);
-      Hardware.setArmMotor("shoulder", "", 45);
-      Hardware.setArmMotor("elbow", "", 120);
-      Hardware.setArmMotor("wrist", "", 90);
-      Hardware.setArmMotor("gripper", "", 180);
+      if (macroTaskHandle != NULL) { vTaskDelete(macroTaskHandle); }
+      Hardware.setArmMotor("base", "", 90); // Stop base rotation
+      xTaskCreatePinnedToCore(pickupMacroTask, "PickupTask", 2048, NULL, 1, &macroTaskHandle, 1);
     } else if (direction == "DROP") {
-      Hardware.setArmMotor("gripper", "", 90);
+      if (macroTaskHandle != NULL) { vTaskDelete(macroTaskHandle); }
+      Hardware.setArmMotor("base", "", 90);
+      xTaskCreatePinnedToCore(dropMacroTask, "DropTask", 2048, NULL, 1, &macroTaskHandle, 1);
     } else if (direction == "HOME" || direction == "RESET") {
+      if (macroTaskHandle != NULL) { vTaskDelete(macroTaskHandle); macroTaskHandle = NULL; }
       Hardware.setArmMotor("base", "", 90);
       Hardware.setArmMotor("shoulder", "", 90);
       Hardware.setArmMotor("elbow", "", 90);
       Hardware.setArmMotor("wrist", "", 90);
+      Hardware.setArmMotor("gripper", "", 90);
     }
     return;
   }
@@ -417,27 +487,27 @@ void streamTask(void *pvParameters) {
     sensor_t *s = esp_camera_sensor_get();
     if (s) {
       // -- Image Quality & Brightness --
-      s->set_brightness(s, 1);       // +1 brightness boost
-      s->set_contrast(s, 1);         // +1 contrast for sharper details
-      s->set_saturation(s, 1);       // +1 saturation for vivid colors
+      s->set_brightness(s, 0);       
+      s->set_contrast(s, 0);         
+      s->set_saturation(s, 0);       
       // -- Auto White Balance --
-      s->set_whitebal(s, 1);         // AWB enabled
-      s->set_awb_gain(s, 1);         // AWB gain enabled
-      s->set_wb_mode(s, 0);          // Auto WB mode
+      s->set_whitebal(s, 1);         
+      s->set_awb_gain(s, 1);         
+      s->set_wb_mode(s, 0);          
       // -- Auto Gain Control (FIX NOISE) --
-      s->set_gain_ctrl(s, 1);        // AGC enabled
-      s->set_gainceiling(s, (gainceiling_t)2); // LOWER gain to 4x (reduces 'jirjire' noise)
+      s->set_gain_ctrl(s, 1);        
+      s->set_gainceiling(s, (gainceiling_t)1); // GAINCEILING_2X (Least noise)
       // -- Auto Exposure Control --
-      s->set_exposure_ctrl(s, 1);    // AEC enabled
-      s->set_aec2(s, 1);             // AEC DSP algorithm enabled
-      s->set_ae_level(s, 0);         // Reset AE level to default (prevents overexposure noise)
+      s->set_exposure_ctrl(s, 1);    
+      s->set_aec2(s, 1);             
+      s->set_ae_level(s, 1);         // +1 AE for natural brightness
       // -- Orientation --
       s->set_vflip(s, 1);
       s->set_hmirror(s, 1);
       // -- Sharpness & Noise --
-      s->set_sharpness(s, 1);        // Lower sharpness slightly to blend noise
-      s->set_denoise(s, 1);          // Denoise ON
-      ESP_LOGI(TAG_CAM, "Sensor calibrated with low-noise settings.");
+      s->set_sharpness(s, 0);        
+      s->set_denoise(s, 1);          
+      ESP_LOGI(TAG_CAM, "Sensor calibrated with neutral default settings.");
     }
   }
 

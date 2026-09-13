@@ -2101,15 +2101,14 @@ export default function Dashboard() {
       
       await new Promise(r => setTimeout(r, 400));
       
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 3: Actuating manipulator to DROP.`);
-      setJoints(prev => ({ ...prev, gripper: 90 }));
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 3: Executing autonomous drop macro...`);
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(console.error);
       
-      await new Promise(r => setTimeout(r, 1000));
+      setJoints(prev => ({ ...prev, shoulder: 45, elbow: 120, gripper: 180 }));
+      await new Promise(r => setTimeout(r, 4000));
       
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Returning to Home pose.`);
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Mission Completed. Arm homed.`);
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
       
       toast.success("Autonomous Drop Mission Completed!");
       return;
@@ -2130,21 +2129,18 @@ export default function Dashboard() {
       
       await new Promise(r => setTimeout(r, 400));
       
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 3: Actuating 5-DOF Arm down to pick object.`);
-      setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 3: Executing autonomous pickup macro...`);
+      // Trigger the ESP32 internal macro
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(console.error);
       
-      await new Promise(r => setTimeout(r, 3500));
+      // The ESP32 macro takes about 6 seconds to complete. 
+      // Update UI to show picking down
+      setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
+      await new Promise(r => setTimeout(r, 6500));
       
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Closing gripper on payload.`);
-      setJoints(prev => ({ ...prev, gripper: 0 }));
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "gripper", angle: 0 }).catch(console.error);
-      
-      await new Promise(r => setTimeout(r, 2000));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 5: Returning arm to Home pose with payload.`);
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Mission Completed. Arm homed with payload.`);
+      // Sync UI to final state (Home with closed gripper)
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
       
       toast.success("Autonomous Pick Mission Completed!");
       return;
@@ -2260,32 +2256,28 @@ export default function Dashboard() {
     }
 
     if (hasPickKeyword || hasColorAndObject) {
-      appendLog(`[${timestamp}] [ARM] Inverse kinematics resolved. Actuating manipulator down: PICKUP.`);
-      setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
+      appendLog(`[${timestamp}] [ARM] Executing autonomous pickup macro...`);
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
       
-      await new Promise(r => setTimeout(r, 3500));
+      // Update UI to show picking down
+      setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
+      await new Promise(r => setTimeout(r, 6500));
       
-      appendLog(`[${new Date().toLocaleTimeString()}] [ARM] Closing gripper on payload.`);
-      setJoints(prev => ({ ...prev, gripper: 0 }));
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "gripper", angle: 0 }).catch(console.error);
-      
-      await new Promise(r => setTimeout(r, 2000));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [ARM] Returning to Home pose with payload.`);
+      appendLog(`[${new Date().toLocaleTimeString()}] [ARM] Mission Completed. Arm homed with payload.`);
+      // Sync UI to final state (Home with closed gripper)
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
 
     } else if (hasDropKeyword) {
-      appendLog(`[${timestamp}] [ARM] Dynamic payload released. Actuating manipulator: DROP.`);
-      setJoints(prev => ({ ...prev, gripper: 90 }));
+      appendLog(`[${timestamp}] [ARM] Executing autonomous drop macro...`);
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
       
-      // Auto-return to HOME after gripper releases (3 seconds)
-      setTimeout(() => {
-        setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
-        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
-      }, 3000);
+      // Update UI to show dropping
+      setJoints(prev => ({ ...prev, shoulder: 45, elbow: 120, gripper: 180 }));
+      await new Promise(r => setTimeout(r, 4000));
+      
+      appendLog(`[${new Date().toLocaleTimeString()}] [ARM] Mission Completed. Arm homed.`);
+      // Sync UI to final state (Home)
+      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
 
     } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal'].some(k => lowerText.includes(k))) {
       appendLog(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
@@ -2310,8 +2302,23 @@ export default function Dashboard() {
       setter(prev => [...prev, msg].slice(-10));
     };
 
-    // FAST-PATH: Local Keyword Matching (Instant response for voice/text driving)
     const lowerText = textToProcess.toLowerCase();
+
+    // Enforce strict English rejection in Bengali mode
+    if (source === "voice" && voiceLanguage === "bn-BD") {
+      const realBengaliWords = [
+        'সামনে', 'আগা', 'এগিয়ে', 'পিছনে', 'পেছনে', 'বামে', 'ডানে', 'থামো', 'দাঁড়াও', 'তোল', 'উঠাও', 'ধরো', 'নাও', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ',
+        'জায়গা', 'সোজা', 'ঘুরে', 'চারপাশ', 'দেখ', 'খুঁজ', 'নাচ', 'লাল', 'নীল', 'সবুজ', 'হলুদ', 'কালো', 'সাদা', 'বস্তু', 'বল', 'জিনিস', 'গিয়ে', 'করো', 'দাও'
+      ];
+      const hasRealBengaliWord = realBengaliWords.some(k => lowerText.includes(k));
+      if (!hasRealBengaliWord) {
+        appendLog(`[${new Date().toLocaleTimeString()}] [SYS] Ignored: Full English command in Bengali mode. Use English mode or Banglish.`);
+        setIsProcessing(false);
+        return;
+      }
+    }
+
+    // FAST-PATH: Local Keyword Matching (Instant response for voice/text driving)
     const isNavCommand = [
       'সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight', 'ফরওয়ার্ড',
       'পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao', 'ব্যাক', 'রিভার্স',
@@ -2356,7 +2363,13 @@ export default function Dashboard() {
   const [voiceLanguage, setVoiceLanguageState] = useState("bn-BD");
   const setVoiceLanguage = useCallback(async (lang: string) => {
     setVoiceLanguageState(lang);
-    
+    // If currently listening, stop it so the user has to restart with the new language
+    if (recognitionRef.current && shouldListenRef.current) {
+      recognitionRef.current.stop();
+      shouldListenRef.current = false;
+      setIsListening(false);
+      toast.info("Language changed. Please click the mic again.");
+    }
   }, []);
   const recognitionRef = useRef<any | null>(null);
   const isVoiceProcessingRef = useRef(false);
