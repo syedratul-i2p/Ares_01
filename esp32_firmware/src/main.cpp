@@ -631,28 +631,224 @@ void setup() {
   server.begin();
   streamServer.begin();
   webSocket.begin();
+}
+
+void controlTask(void *pvParameters) {
+  for (;;) {
+
+    static unsigned long lastSlowHeartbeat = 0;
+    if (millis() - lastSlowHeartbeat > 2000) {
+      webSocket.broadcastTXT(
+          "{\"status\": \"online\", \"distance\": 999, \"battery\": 100}");
+      lastSlowHeartbeat = millis();
+    }
+
+    static bool was_arm_moving = false;
+    static String last_arm_joint = "";
+    static String last_arm_dir = "";
+
+    if (arm_moving) {
+      if (!was_arm_moving || arm_joint != last_arm_joint ||
+          arm_dir != last_arm_dir) {
+        Serial.printf("[ARM EXEC] Driving %s %s\n", arm_joint.c_str(),
+                      arm_dir.c_str());
+        Hardware.driveArmMotor(arm_joint, arm_dir, 4095);
+        was_arm_moving = true;
+        last_arm_joint = arm_joint;
+        last_arm_dir = arm_dir;
+      }
+    } else {
+      if (was_arm_moving) {
+        Serial.println("[ARM EXEC] Stopping all motors");
+        Hardware.stopArm();
+        was_arm_moving = false;
+        last_arm_joint = "";
+        last_arm_dir = "";
+      }
+    }
+
+    // Mode B: Non-blocking Serial Listener for Live WiFi Config Injection
+    if (Serial.available()) {
+      String line = Serial.readStringUntil('\n');
+      line.trim();
+      if (line.startsWith("$WIFI:")) {
+        int firstColon = line.indexOf(':');
+        int secondColon = line.indexOf(':', firstColon + 1);
+        if (firstColon > 0 && secondColon > 0) {
+          String new_ssid = line.substring(firstColon + 1, secondColon);
+          String new_pass = line.substring(secondColon + 1);
+          preferences.putString("ssid", new_ssid);
+          preferences.putString("pass", new_pass);
+          Serial.println(
+              "[SYSTEM] New WiFi Config Received via Serial! Reconnecting...");
+          WiFi.disconnect(true);
+          WiFi.begin(new_ssid.c_str(), new_pass.c_str());
+        }
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Disable Brownout detector
+  delay(2000);
+  Serial.begin(115200);
+  Serial.setTimeout(10); // CRITICAL: Prevent readStringUntil from blocking Core 0!
+
+  // Initialize Custom Hardware Controller (I2C, PWM, Sensors)
+  Hardware.begin();
+
+  Serial.println("[SCAN] Scanning Wire (I2C0)...");
+  for (byte i = 1; i < 127; i++) {
+    Wire.beginTransmission(i);
+    if (Wire.endTransmission() == 0)
+      Serial.printf("[SCAN] Found device on Wire at 0x%02X\n", i);
+  }
+
+  // Set ESP Log Level globally
+  esp_log_level_set("*", ESP_LOG_INFO);
+
+  ESP_LOGI(TAG_SYS, "Booting Advanced ESP32-S3 Firmware...");
+
+  // Clear corrupt NVS WiFi cache to prevent AP/STA password rejection
+  WiFi.persistent(false); // Don't write to flash on every boot
+  WiFi.disconnect(true);
+  vTaskDelay(pdMS_TO_TICKS(50));
+  WiFi.mode(WIFI_MODE_NULL);
+  vTaskDelay(pdMS_TO_TICKS(50));
+
+  WiFi.setSleep(false);
+  delay(500);
+
+  preferences.begin("ares", false);
+  // -- 4. NETWORK INITIALIZATION --
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ap_ssid, ap_password, 6, 0, 4);
+  ESP_LOGI(TAG_WIFI, "Running strictly in Offline AP Mode. IP: %s", WiFi.softAPIP().toString().c_str());
+  
+  delay(1000);
+
+  server.enableCORS(true);
+
+  server.on("/", HTTP_GET,
+            []() { server.send(200, "text/plain", "ARES-01 ONLINE"); });
+
+  server.on("/command", HTTP_POST, handleCommand);
+  server.on("/command", HTTP_OPTIONS, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    server.send(204);
+  });
+
+  streamServer.enableCORS(true);
+  streamServer.on("/stream", HTTP_GET, stream_handler);
+  streamServer.onNotFound([]() {
+    if (streamServer.method() == HTTP_OPTIONS) {
+      streamServer.sendHeader("Access-Control-Allow-Origin", "*");
+      streamServer.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+      streamServer.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+      streamServer.send(204);
+    } else {
+      streamServer.send(404, "text/plain", "Not Found");
+    }
+  });
+
+  server.on("/capture", HTTP_GET, handleCapture);
+
+  server.on("/telemetry", HTTP_GET, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Private-Network", "true");
+    server.sendHeader("Cache-Control", "no-cache");
+    server.send(200, "application/json",
+                "{\"battery\":100, \"distance\":10, \"status\":\"ok\"}");
+  });
+
+  server.onNotFound([]() {
+    if (server.method() == HTTP_OPTIONS) {
+      server.sendHeader("Access-Control-Allow-Origin", "*");
+      server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+      server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+      server.send(204);
+    } else {
+      server.send(404, "text/plain", "Not Found");
+    }
+  });
+
+  server.on("/update", HTTP_OPTIONS, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    server.send(204);
+  });
+
+  server.on("/update", HTTP_POST, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+    delay(1000);
+    ESP.restart();
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.printf("OTA Update Start: %s\n", upload.filename.c_str());
+      // For ESP32-S3 we update the active app partition
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) {
+        Serial.printf("OTA Update Success: %uB\n", upload.totalSize);
+      } else {
+        Update.printError(Serial);
+      }
+    }
+  });
+
+  server.on("/reset", HTTP_ANY, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", "{\"status\":\"rebooting\"}");
+    delay(500);
+    ESP.restart();
+  });
+
+  server.on("/reboot", HTTP_ANY, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", "{\"status\":\"rebooting\"}");
+    delay(150);
+    ESP.restart();
+  });
+
+  server.begin();
+  streamServer.begin();
+  webSocket.begin();
   webSocket.enableHeartbeat(15000, 4000, 3);
   webSocket.onEvent(webSocketEvent);
   ESP_LOGI(TAG_SYS, "Web Servers and WebSocket Server Started.");
 
     // Create API Task (WebSockets) on Core 1 with HIGH Priority (2) for instant response
     xTaskCreatePinnedToCore(
-        [](void *pvParameters) {
-          for (;;) {
-            webSocket.loop();
-            server.handleClient();
-            vTaskDelay(pdMS_TO_TICKS(15));
-          }
-        },
-        "API_Task", 4096, NULL, 2, NULL, 1); 
+      [](void *pvParameters) {
+        for (;;) {
+          webSocket.loop();
+          server.handleClient();
+          vTaskDelay(pdMS_TO_TICKS(5)); // Prevent starvation
+        }
+      },
+      "API_Task", 8192, NULL, 2, NULL, 1); 
 
-    // Create Stream Task on Core 1 with LOW Priority (1) so it doesn't starve WebSockets
-    xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 1,
-                            &streamTaskHandle, 1);
-    
-    // Create Control Task on Core 1 with HIGH Priority (2) for instant motor I2C commands
-    xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 2,
-                            &controlTaskHandle, 1); 
+  // Create Stream Task on Core 1 with LOW Priority (1) so it doesn't starve WebSockets
+  xTaskCreatePinnedToCore(streamTask, "StreamTask", 10240, NULL, 1,
+                          &streamTaskHandle, 1);
+  
+  // Create Control Task on Core 1 with HIGH Priority (2) for instant motor I2C commands
+  xTaskCreatePinnedToCore(controlTask, "ControlTask", 8192, NULL, 2,
+                          &controlTaskHandle, 1); 
   ESP_LOGI(TAG_SYS, "FreeRTOS Dual-Core Architecture initialized!");
 }
 
