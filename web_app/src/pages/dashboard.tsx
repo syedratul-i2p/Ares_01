@@ -592,9 +592,10 @@ const CameraView = React.memo(function CameraView({
   }, []);
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-[#050505] overflow-hidden flex items-center justify-center">
+    <div ref={containerRef} className="relative w-full h-full bg-[#050505] overflow-hidden flex items-center justify-center rounded-xl">
+      {/* ROTATED CAMERA CONTAINER */}
       <div 
-        className="relative w-full h-full origin-center transform-gpu will-change-transform z-10"
+        className="absolute inset-0 origin-center transform-gpu will-change-transform z-10 flex items-center justify-center"
         style={{ 
           transform: `rotate(90deg) scale(${aspectScale})`,
           transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
@@ -606,7 +607,7 @@ const CameraView = React.memo(function CameraView({
             key={streamKey}
             src={isStreamSevered || isRebooting ? "" : `${streamSrc}&t=${streamKey}`} 
             alt="ARES-01 live feed"
-            className="w-full h-full object-contain rounded-xl pointer-events-none select-none"
+            className="w-full h-full object-contain pointer-events-none select-none"
             style={{ display: streamError || !roverOnline || isStreamSevered || isRebooting ? 'none' : 'block' }}
             onLoad={() => {
               retryCountRef.current = 0;
@@ -631,9 +632,12 @@ const CameraView = React.memo(function CameraView({
             data-testid="camera-feed"
           />
         ) : null}
+      </div>
 
+      {/* UNROTATED OVERLAY CONTAINER */}
+      <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center rounded-xl overflow-hidden">
         {(isStreamSevered || isRebooting) ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-50">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 pointer-events-auto">
             <div className="w-16 h-16 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mb-4" />
             <span className="text-indigo-400 font-mono text-xl font-bold tracking-[0.2em] animate-pulse">
               ARES-01 REBOOTING...
@@ -643,7 +647,7 @@ const CameraView = React.memo(function CameraView({
             </span>
           </div>
         ) : (streamError || !roverOnline || isStreamLoading) && (
-          <div className="absolute inset-0">
+          <div className="absolute inset-0 bg-[#0f172a] pointer-events-auto flex items-center justify-center">
             {/* Ambient AI visual glow layers behind the grid */}
             <div 
               className="absolute left-0 top-0 bottom-0 w-1/4 bg-gradient-to-b from-cyan-400/10 via-purple-500/10 to-indigo-500/10 blur-2xl animate-pulse pointer-events-none z-0"
