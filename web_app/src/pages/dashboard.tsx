@@ -2746,8 +2746,8 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex-[4] w-[98%] mx-auto relative flex items-center justify-center overflow-hidden">
-          <div className="w-full h-full relative flex items-center justify-center bg-black overflow-hidden shadow-2xl rounded-xl border border-white/10">
-            {/* Ambient Auroras restricted to the 16:9 container */}
+          <div className="h-full aspect-[4/3] max-w-full relative flex items-center justify-center bg-black overflow-hidden shadow-2xl rounded-xl border border-white/10">
+            {/* Ambient Auroras restricted to the container */}
             <div className="absolute -top-10 -left-10 w-72 h-72 rounded-full bg-gradient-to-br from-indigo-500/20 via-purple-500/20 to-pink-500/20 blur-[80px] pointer-events-none float-blob-1" />
             <div className="absolute -bottom-16 -right-16 w-80 h-80 rounded-full bg-gradient-to-br from-blue-500/20 via-teal-500/20 to-indigo-500/20 blur-[90px] pointer-events-none float-blob-2" />
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] h-[80%] rounded-full bg-gradient-to-tr from-purple-600/5 via-blue-600/5 to-teal-500/5 blur-[100px] pointer-events-none animate-pulse" style={{ animationDuration: "8s" }} />
