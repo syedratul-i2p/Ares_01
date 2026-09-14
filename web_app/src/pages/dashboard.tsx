@@ -978,20 +978,7 @@ const ArmControls = React.memo(function ArmControls({
         </div>
       </div>
 
-      <div className="arm-presets-grid grid grid-cols-4 gap-2 px-1 pb-1">
-        {ARM_PRESETS.map(p => {
-          const isActive = joints.base === p.joints.base && joints.shoulder === p.joints.shoulder && joints.elbow === p.joints.elbow && joints.wrist === p.joints.wrist && joints.gripper === p.joints.gripper;
-          return (
-            <button key={p.name} onClick={() => { applyPreset(p); }}
-              className={`text-[11px] py-1.5 px-1 rounded-md border transition-all duration-300 ease-out font-semibold cursor-pointer active:scale-95 shadow-sm ${
-                isActive 
-                  ? "bg-primary text-primary-foreground border-primary shadow-[0_0_15px_rgba(var(--primary),0.5)] scale-105" 
-                  : "bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/20 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 hover:border-primary dark:hover:border-primary hover:text-primary dark:hover:text-primary hover:scale-105 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)]"
-              }`}
-              data-testid={`btn-preset-${p.name.toLowerCase()}`}>{p.name}</button>
-          );
-        })}
-      </div>
+      {/* Preset buttons removed — use Reset Arm to Home button or voice commands */}
 
       <div className="arm-canvas-sliders-flex flex flex-col md:flex-row gap-2 md:gap-1 items-center bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-2 md:p-1 md:py-1 w-full font-sans backdrop-blur-md shadow-lg">
         <div className="arm-canvas-wrapper relative w-[130px] h-[80px] rounded-lg border border-slate-700 bg-slate-900 overflow-hidden shrink-0 flex items-center justify-center shadow-[inset_0_2px_15px_rgba(0,0,0,0.6)]">
@@ -1055,12 +1042,12 @@ const ArmControls = React.memo(function ArmControls({
         </div>
       </div>
       <button
-        className="arm-reset-bottom w-full mt-1 text-xs gap-1.5 h-7 rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-foreground transition-all flex items-center justify-center cursor-pointer shadow-md active:scale-98"
+        className="arm-reset-bottom group w-full mt-2 text-sm gap-2 h-9 rounded-lg border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 hover:from-emerald-500/25 hover:to-cyan-500/25 text-emerald-400 hover:text-emerald-300 transition-all duration-300 flex items-center justify-center cursor-pointer shadow-lg hover:shadow-emerald-500/20 active:scale-95 font-semibold tracking-wide"
         onClick={handleResetArm}
         data-testid="btn-arm-reset-bottom"
       >
-        <RotateCcw className="w-3 h-3" />
-        Reset Arm to Home
+        <RotateCcw className="w-4 h-4 group-hover:animate-spin transition-transform" />
+        🏠 Reset Arm to Home
       </button>
     </div>
   );
@@ -2066,8 +2053,8 @@ export default function Dashboard() {
     // Keywords
     const hasDriveKeyword = ['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight', 'ফরওয়ার্ড'].some(k => lowerText.includes(k));
     const hasReverseKeyword = ['পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao', 'ব্যাক', 'রিভার্স'].some(k => lowerText.includes(k));
-    const hasPickKeyword = ['তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tulo', 'tolo', 'uthao', 'dhoro', 'nao', 'pikap', 'উঠা', 'তুলে', 'ওঠাও', 'collect', 'lift', 'পিকআপ', 'পিক'].some(k => lowerText.includes(k));
-    const hasDropKeyword = ['ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo', 'ড্রপ', 'রিলিজ'].some(k => lowerText.includes(k));
+    const hasPickKeyword = ['pick', 'grab', 'pikap', 'collect', 'পিকআপ', 'পিক'].some(k => lowerText.includes(k));
+    const hasDropKeyword = ['drop', 'ড্রপ'].some(k => lowerText.includes(k));
     const hasScanKeyword = ['চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo', 'স্ক্যান', 'সার্চ'].some(k => lowerText.includes(k));
 
     // Color keyword detection
@@ -2259,96 +2246,76 @@ export default function Dashboard() {
       setAiTaskState("idle");
     }
 
-    if (hasPickKeyword || hasColorAndObject) {
-      appendLog(`[${timestamp}] [ARM] Executing autonomous pickup macro...`);
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-      
-      // Update UI to show picking down
-      setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
-      await new Promise(r => setTimeout(r, 6500));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [ARM] Mission Completed. Arm homed with payload.`);
-      // Sync UI to final state (Home with closed gripper)
-      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
+    // F. Individual Arm Joint Commands — CHECK FIRST before macros to avoid conflicts
+    const hasGripper = ['গ্রিপার', 'gripper', 'grip', 'ধরন', 'চিমটা', 'claw', 'jaw', 'ক্ল', 'গ্রিপ'].some(k => lowerText.includes(k));
+    const hasShoulder = ['শোল্ডার', 'shoulder', 'কাঁধ', 'kandh', 'কাধ', 'সোল্ডার'].some(k => lowerText.includes(k));
+    const hasElbow = ['এলবো', 'elbow', 'কনুই', 'konui', 'কনু', 'এলব'].some(k => lowerText.includes(k));
+    const hasWrist = ['রিস্ট', 'wrist', 'কবজি', 'kobji', 'risk', 'rist', 'rest', 'রিষ্ট', 'রিস্', 'কব্জি'].some(k => lowerText.includes(k));
+    const hasBaseJoint = ['বেস', 'base', 'ঘুরাও', 'ghurao', 'rotate', 'turn', 'ঘোরাও', 'spin', 'bass', 'bays', 'pace', 'বেইস', 'বেজ'].some(k => lowerText.includes(k));
 
-    } else if (hasDropKeyword) {
-      appendLog(`[${timestamp}] [ARM] Executing autonomous drop macro...`);
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-      
-      // Update UI to show dropping
-      setJoints(prev => ({ ...prev, shoulder: 45, elbow: 120, gripper: 180 }));
-      await new Promise(r => setTimeout(r, 4000));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [ARM] Mission Completed. Arm homed.`);
-      // Sync UI to final state (Home)
-      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
+    const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা', 'উঠা', 'তুলো', 'আপ'].some(k => lowerText.includes(k));
+    const hasDown = ['নিচে', 'niche', 'down', 'নামাও', 'নেও', 'namao', 'lower', 'নামা', 'ডাউন'].some(k => lowerText.includes(k));
+    const hasOpen = ['খোলো', 'খুলো', 'open', 'kholo', 'khulo', 'ওপেন', 'release'].some(k => lowerText.includes(k));
+    const hasClose = ['বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'atkao', 'shut', 'clamp'].some(k => lowerText.includes(k));
+    const hasLeft = ['বামে', 'বাম', 'left', 'bame'].some(k => lowerText.includes(k));
+    const hasRight = ['ডানে', 'ডান', 'right', 'daine'].some(k => lowerText.includes(k));
 
+    // Auto-stop duration for DC motors (ms)
+    const JOINT_RUN_MS = 1500;
+    const sendJointWithAutoStop = (joint: string, angle: number) => {
+      if (commandUrl) {
+        sendCommandViaHttp(commandUrl, { mode: "arm", action: "arm_control", joint, angle }).catch(console.error);
+        setTimeout(() => {
+          sendCommandViaHttp(commandUrl, { mode: "arm", action: "arm_control", joint, angle: 90 }).catch(console.error);
+        }, JOINT_RUN_MS);
+      }
+    };
+
+    const hasAnyJoint = hasGripper || hasShoulder || hasElbow || hasWrist || hasBaseJoint;
+
+    if (hasGripper) {
+      if (hasOpen) {
+        appendLog(`[${timestamp}] [ARM] Gripper: OPENING.`);
+        setJoints(prev => ({ ...prev, gripper: 0 }));
+        sendJointWithAutoStop("gripper", 0);
+      } else if (hasClose) {
+        appendLog(`[${timestamp}] [ARM] Gripper: CLOSING.`);
+        setJoints(prev => ({ ...prev, gripper: 180 }));
+        sendJointWithAutoStop("gripper", 180);
+      } else {
+        appendLog(`[${timestamp}] [ARM] Gripper: OPENING (default).`);
+        setJoints(prev => ({ ...prev, gripper: 0 }));
+        sendJointWithAutoStop("gripper", 0);
+      }
+    } else if (hasShoulder) {
+      const angle = hasUp ? 180 : hasDown ? 0 : 90;
+      appendLog(`[${timestamp}] [ARM] Shoulder: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
+      setJoints(prev => ({ ...prev, shoulder: angle }));
+      sendJointWithAutoStop("shoulder", angle);
+    } else if (hasElbow) {
+      const angle = hasUp ? 180 : hasDown ? 0 : 90;
+      appendLog(`[${timestamp}] [ARM] Elbow: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
+      setJoints(prev => ({ ...prev, elbow: angle }));
+      sendJointWithAutoStop("elbow", angle);
+    } else if (hasWrist) {
+      const angle = hasUp ? 180 : hasDown ? 0 : 90;
+      appendLog(`[${timestamp}] [ARM] Wrist: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
+      setJoints(prev => ({ ...prev, wrist: angle }));
+      sendJointWithAutoStop("wrist", angle);
+    } else if (hasBaseJoint) {
+      const angle = hasLeft ? 0 : hasRight ? 180 : 90;
+      appendLog(`[${timestamp}] [ARM] Base: ${hasLeft ? 'LEFT' : hasRight ? 'RIGHT' : 'STOP'}.`);
+      setJoints(prev => ({ ...prev, base: angle }));
+      sendJointWithAutoStop("base", angle);
     } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal'].some(k => lowerText.includes(k))) {
+      // G. Home/Reset — only if no joint name was specified
       appendLog(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    } else {
-      // F. Individual Arm Joint Commands (Bengali + English + Banglish + Phonetic)
-      const hasGripper = ['গ্রিপার', 'gripper', 'grip', 'ধরন', 'চিমটা', 'claw', 'jaw', 'ক্ল', 'গ্রিপ'].some(k => lowerText.includes(k));
-      const hasShoulder = ['শোল্ডার', 'shoulder', 'কাঁধ', 'kandh', 'কাধ', 'সোল্ডার'].some(k => lowerText.includes(k));
-      const hasElbow = ['এলবো', 'elbow', 'কনুই', 'konui', 'কনু', 'এলব'].some(k => lowerText.includes(k));
-      const hasWrist = ['রিস্ট', 'wrist', 'কবজি', 'kobji', 'risk', 'rist', 'rest', 'রিষ্ট', 'রিস্', 'কব্জি'].some(k => lowerText.includes(k));
-      const hasBase = ['বেস', 'base', 'ঘুরাও', 'ghurao', 'rotate', 'turn', 'ঘোরাও', 'spin', 'bass', 'bays', 'pace', 'বেইস', 'বেজ'].some(k => lowerText.includes(k));
-
-      const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা', 'উঠা', 'তুলো', 'আপ'].some(k => lowerText.includes(k));
-      const hasDown = ['নিচে', 'niche', 'down', 'নামাও', 'নেও', 'namao', 'lower', 'নামা', 'ডাউন'].some(k => lowerText.includes(k));
-      const hasOpen = ['খোলো', 'খুলো', 'open', 'kholo', 'khulo', 'ওপেন', 'release'].some(k => lowerText.includes(k));
-      const hasClose = ['বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'atkao', 'shut', 'clamp'].some(k => lowerText.includes(k));
-      const hasLeft = ['বামে', 'বাম', 'left', 'bame'].some(k => lowerText.includes(k));
-      const hasRight = ['ডানে', 'ডান', 'right', 'daine'].some(k => lowerText.includes(k));
-
-      // Auto-stop duration for DC motors (ms) — motor runs then stops
-      const JOINT_RUN_MS = 1500;
-
-      const sendJointWithAutoStop = (joint: string, angle: number) => {
-        if (commandUrl) {
-          sendCommandViaHttp(commandUrl, { mode: "arm", action: "arm_control", joint, angle }).catch(console.error);
-          // Auto-stop the motor after duration
-          setTimeout(() => {
-            sendCommandViaHttp(commandUrl, { mode: "arm", action: "arm_control", joint, angle: 90 }).catch(console.error);
-          }, JOINT_RUN_MS);
+      if (commandUrl) {
+        sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+        for (const joint of ["base", "shoulder", "elbow", "wrist", "gripper"]) {
+          sendCommandViaHttp(commandUrl, { mode: "arm", action: "arm_control", joint, angle: 90 }).catch(console.error);
         }
-      };
-
-      if (hasGripper) {
-        if (hasOpen) {
-          appendLog(`[${timestamp}] [ARM] Gripper: OPENING.`);
-          setJoints(prev => ({ ...prev, gripper: 0 }));
-          sendJointWithAutoStop("gripper", 0);
-        } else if (hasClose) {
-          appendLog(`[${timestamp}] [ARM] Gripper: CLOSING.`);
-          setJoints(prev => ({ ...prev, gripper: 180 }));
-          sendJointWithAutoStop("gripper", 180);
-        } else {
-          appendLog(`[${timestamp}] [ARM] Gripper: OPENING (default).`);
-          setJoints(prev => ({ ...prev, gripper: 0 }));
-          sendJointWithAutoStop("gripper", 0);
-        }
-      } else if (hasShoulder) {
-        const angle = hasUp ? 180 : hasDown ? 0 : 90;
-        appendLog(`[${timestamp}] [ARM] Shoulder: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
-        setJoints(prev => ({ ...prev, shoulder: angle }));
-        sendJointWithAutoStop("shoulder", angle);
-      } else if (hasElbow) {
-        const angle = hasUp ? 180 : hasDown ? 0 : 90;
-        appendLog(`[${timestamp}] [ARM] Elbow: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
-        setJoints(prev => ({ ...prev, elbow: angle }));
-        sendJointWithAutoStop("elbow", angle);
-      } else if (hasWrist) {
-        const angle = hasUp ? 180 : hasDown ? 0 : 90;
-        appendLog(`[${timestamp}] [ARM] Wrist: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
-        setJoints(prev => ({ ...prev, wrist: angle }));
-        sendJointWithAutoStop("wrist", angle);
-      } else if (hasBase) {
-        const angle = hasLeft ? 0 : hasRight ? 180 : 90;
-        appendLog(`[${timestamp}] [ARM] Base: ${hasLeft ? 'LEFT' : hasRight ? 'RIGHT' : 'STOP'}.`);
-        setJoints(prev => ({ ...prev, base: angle }));
-        sendJointWithAutoStop("base", angle);
       }
     }
 
