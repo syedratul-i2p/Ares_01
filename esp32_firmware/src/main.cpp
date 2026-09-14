@@ -76,34 +76,35 @@ static const char *_STREAM_PART =
 TaskHandle_t macroTaskHandle = NULL;
 
 void pickupMacroTask(void *pvParameters) {
-  // Phase 1: Open gripper and move arm down
-  Hardware.setArmMotor("gripper", "", 180); // Open
-  Hardware.setArmMotor("shoulder", "", 0);  // Down
-  Hardware.setArmMotor("elbow", "", 0);     // Down
-  vTaskDelay(pdMS_TO_TICKS(1800)); 
+  // Phase 1: Open gripper FIRST (0 = OPEN direction)
+  Hardware.setArmMotor("gripper", "", 0);
+  vTaskDelay(pdMS_TO_TICKS(800));
+  Hardware.setArmMotor("gripper", "", 90);   // Stop
 
-  // Phase 2: Stop arm descent, ensure gripper is fully open
-  Hardware.setArmMotor("shoulder", "", 90); // Stop
-  Hardware.setArmMotor("elbow", "", 90);    // Stop
-  vTaskDelay(pdMS_TO_TICKS(1000));
-  Hardware.setArmMotor("gripper", "", 90);  // Stop gripper open
+  // Phase 2: Lower arm down to object
+  Hardware.setArmMotor("shoulder", "", 0);   // Down
+  Hardware.setArmMotor("elbow", "", 0);      // Down
+  vTaskDelay(pdMS_TO_TICKS(1800));
+  Hardware.setArmMotor("shoulder", "", 90);  // Stop
+  Hardware.setArmMotor("elbow", "", 90);     // Stop
+  vTaskDelay(pdMS_TO_TICKS(500));
 
-  // Phase 3: Close gripper to pick up
-  Hardware.setArmMotor("gripper", "", 0);   // Close
-  vTaskDelay(pdMS_TO_TICKS(2000));
-  Hardware.setArmMotor("gripper", "", 90);  // Stop closing
+  // Phase 3: Close gripper to GRAB object (180 = CLOSE direction)
+  Hardware.setArmMotor("gripper", "", 180);
+  vTaskDelay(pdMS_TO_TICKS(1500));
+  Hardware.setArmMotor("gripper", "", 90);   // Stop
 
-  // Phase 4: Raise arm back up
+  // Phase 4: Raise arm back up with payload
   Hardware.setArmMotor("shoulder", "", 180); // Up
   Hardware.setArmMotor("elbow", "", 180);    // Up
   vTaskDelay(pdMS_TO_TICKS(2000));
 
-  // Phase 5: Stop all (Home)
+  // Phase 5: Stop all (Home position)
   Hardware.setArmMotor("base", "", 90);
   Hardware.setArmMotor("shoulder", "", 90);
   Hardware.setArmMotor("elbow", "", 90);
   Hardware.setArmMotor("wrist", "", 90);
-  Hardware.setArmMotor("gripper", "", 90);
+  // Keep gripper stopped (holding object)
   
   macroTaskHandle = NULL;
   vTaskDelete(NULL);
@@ -117,9 +118,9 @@ void dropMacroTask(void *pvParameters) {
   Hardware.setArmMotor("shoulder", "", 90);
   Hardware.setArmMotor("elbow", "", 90);
 
-  // Phase 2: Open gripper to drop
-  Hardware.setArmMotor("gripper", "", 180); // Open
-  vTaskDelay(pdMS_TO_TICKS(1500));
+  // Phase 2: Open gripper to DROP object (0 = OPEN direction)
+  Hardware.setArmMotor("gripper", "", 0);
+  vTaskDelay(pdMS_TO_TICKS(1200));
   Hardware.setArmMotor("gripper", "", 90);  // Stop gripper
 
   // Phase 3: Raise arm back up

@@ -2279,10 +2279,60 @@ export default function Dashboard() {
       // Sync UI to final state (Home)
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
 
-    } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal'].some(k => lowerText.includes(k))) {
+    } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal'].some(k => lowerText.includes(k))) {
       appendLog(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+    } else {
+      // F. Individual Arm Joint Commands
+      const hasGripper = ['গ্রিপার', 'gripper', 'grip', 'ধরন', 'চিমটা'].some(k => lowerText.includes(k));
+      const hasShoulder = ['শোল্ডার', 'shoulder', 'কাঁধ', 'kandh'].some(k => lowerText.includes(k));
+      const hasElbow = ['এলবো', 'elbow', 'কনুই', 'konui'].some(k => lowerText.includes(k));
+      const hasWrist = ['রিস্ট', 'wrist', 'কবজি', 'kobji'].some(k => lowerText.includes(k));
+      const hasBase = ['বেস', 'base', 'ঘুরাও', 'ghurao'].some(k => lowerText.includes(k));
+
+      const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'uthao', 'উঠাও', 'তোলো', 'ওঠাও'].some(k => lowerText.includes(k));
+      const hasDown = ['নিচে', 'niche', 'down', 'নামাও', 'নেও', 'namao'].some(k => lowerText.includes(k));
+      const hasOpen = ['খোলো', 'খুলো', 'open', 'kholo', 'khulo', 'ওপেন'].some(k => lowerText.includes(k));
+      const hasClose = ['বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'atkao'].some(k => lowerText.includes(k));
+      const hasLeft = ['বামে', 'বাম', 'left', 'bame'].some(k => lowerText.includes(k));
+      const hasRight = ['ডানে', 'ডান', 'right', 'daine'].some(k => lowerText.includes(k));
+
+      if (hasGripper) {
+        if (hasOpen) {
+          appendLog(`[${timestamp}] [ARM] Gripper: OPENING.`);
+          setJoints(prev => ({ ...prev, gripper: 0 }));
+          if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "gripper", angle: 0 }).catch(console.error);
+        } else if (hasClose) {
+          appendLog(`[${timestamp}] [ARM] Gripper: CLOSING.`);
+          setJoints(prev => ({ ...prev, gripper: 180 }));
+          if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "gripper", angle: 180 }).catch(console.error);
+        } else {
+          // Default: toggle (open if not fully open, else close)
+          appendLog(`[${timestamp}] [ARM] Gripper: TOGGLING.`);
+          if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "gripper", angle: 0 }).catch(console.error);
+        }
+      } else if (hasShoulder) {
+        const angle = hasUp ? 180 : hasDown ? 0 : 90;
+        appendLog(`[${timestamp}] [ARM] Shoulder: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
+        setJoints(prev => ({ ...prev, shoulder: angle }));
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "shoulder", angle }).catch(console.error);
+      } else if (hasElbow) {
+        const angle = hasUp ? 180 : hasDown ? 0 : 90;
+        appendLog(`[${timestamp}] [ARM] Elbow: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
+        setJoints(prev => ({ ...prev, elbow: angle }));
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "elbow", angle }).catch(console.error);
+      } else if (hasWrist) {
+        const angle = hasUp ? 180 : hasDown ? 0 : 90;
+        appendLog(`[${timestamp}] [ARM] Wrist: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
+        setJoints(prev => ({ ...prev, wrist: angle }));
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "wrist", angle }).catch(console.error);
+      } else if (hasBase) {
+        const angle = hasLeft ? 0 : hasRight ? 180 : 90;
+        appendLog(`[${timestamp}] [ARM] Base: ${hasLeft ? 'LEFT' : hasRight ? 'RIGHT' : 'STOP'}.`);
+        setJoints(prev => ({ ...prev, base: angle }));
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "base", angle }).catch(console.error);
+      }
     }
 
     // Status
@@ -2308,7 +2358,8 @@ export default function Dashboard() {
     if (source === "voice" && voiceLanguage === "bn-BD") {
       const realBengaliWords = [
         'সামনে', 'আগা', 'এগিয়ে', 'পিছনে', 'পেছনে', 'বামে', 'ডানে', 'থামো', 'দাঁড়াও', 'তোল', 'উঠাও', 'ধরো', 'নাও', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ',
-        'জায়গা', 'সোজা', 'ঘুরে', 'চারপাশ', 'দেখ', 'খুঁজ', 'নাচ', 'লাল', 'নীল', 'সবুজ', 'হলুদ', 'কালো', 'সাদা', 'বস্তু', 'বল', 'জিনিস', 'গিয়ে', 'করো', 'দাও'
+        'জায়গা', 'সোজা', 'ঘুরে', 'চারপাশ', 'দেখ', 'খুঁজ', 'নাচ', 'লাল', 'নীল', 'সবুজ', 'হলুদ', 'কালো', 'সাদা', 'বস্তু', 'বল', 'জিনিস', 'গিয়ে', 'করো', 'দাও',
+        'গ্রিপার', 'শোল্ডার', 'এলবো', 'রিস্ট', 'বেস', 'কাঁধ', 'কনুই', 'কবজি', 'খোলো', 'খুলো', 'বন্ধ', 'ওপরে', 'উপরে', 'নিচে', 'নামাও', 'ঘুরাও', 'আটকাও', 'চিমটা', 'ধরন'
       ];
       const hasRealBengaliWord = realBengaliWords.some(k => lowerText.includes(k));
       if (!hasRealBengaliWord) {
@@ -2331,17 +2382,27 @@ export default function Dashboard() {
       'চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo', 'স্ক্যান', 'সার্চ',
       'নাচ', 'ডান্স', 'dance', 'celebrate', 'nacho', 'anondo', 'ghuro',
       'sec', 'সেকেন্ড',
-      // Color keywords (triggers pick when combined with object words)
+      // Color keywords
       'লাল', 'red', 'নীল', 'blue', 'সবুজ', 'green', 'হলুদ', 'yellow', 'কালো', 'black', 'সাদা', 'white', 'shada', 'sada', 'হোয়াইট', 'গ্রিন', 'ব্লু', 'ইয়েলো', 'ব্ল্যাক', 'রেড',
       // Object words
-      'বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu', 'অবজেক্ট'
+      'বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu', 'অবজেক্ট',
+      // Individual arm joint keywords
+      'gripper', 'grip', 'গ্রিপার', 'চিমটা', 'ধরন',
+      'shoulder', 'শোল্ডার', 'কাঁধ', 'kandh',
+      'elbow', 'এলবো', 'কনুই', 'konui',
+      'wrist', 'রিস্ট', 'কবজি', 'kobji',
+      'base', 'বেস', 'ঘুরাও', 'ghurao',
+      'খোলো', 'খুলো', 'open', 'kholo', 'ওপেন',
+      'বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও',
+      'উপরে', 'ওপরে', 'up', 'upore',
+      'নিচে', 'niche', 'down', 'নামাও', 'নেও'
     ].some(k => lowerText.includes(k));
 
     if (isNavCommand) {
         // Run instantly
         appendLog(`[${new Date().toLocaleTimeString()}] [SYS] Fast-path local command executed.`);
-        executeLocalKeywordFallback(textToProcess, new Date().toLocaleTimeString(), appendLog);
-        setTimeout(() => setIsProcessing(false), 300);
+        await executeLocalKeywordFallback(textToProcess, new Date().toLocaleTimeString(), appendLog);
+        setIsProcessing(false);
         return;
     }
 
@@ -2351,7 +2412,7 @@ export default function Dashboard() {
     setTimeout(() => {
         setIsProcessing(false);
     }, 500);
-  }, [directiveInput, isProcessing, commandUrl, executeLocalKeywordFallback, executeAutonomousDirective]);
+  }, [directiveInput, isProcessing, commandUrl, executeLocalKeywordFallback, executeAutonomousDirective, voiceLanguage]);
 
 
 
@@ -2363,17 +2424,27 @@ export default function Dashboard() {
   const [voiceLanguage, setVoiceLanguageState] = useState("bn-BD");
   const setVoiceLanguage = useCallback(async (lang: string) => {
     setVoiceLanguageState(lang);
-    // If currently listening, stop it so the user has to restart with the new language
-    if (recognitionRef.current && shouldListenRef.current) {
-      recognitionRef.current.stop();
-      shouldListenRef.current = false;
-      setIsListening(false);
-      toast.info("Language changed. Please click the mic again.");
+    // Update the recognition object's lang property directly
+    if (recognitionRef.current) {
+      if (shouldListenRef.current) {
+        // If currently listening, stop and restart with new language
+        try { recognitionRef.current.stop(); } catch (e) {}
+        setTimeout(() => {
+          if (recognitionRef.current) {
+            recognitionRef.current.lang = lang;
+            try { recognitionRef.current.start(); } catch (e) {}
+          }
+        }, 300);
+      } else {
+        recognitionRef.current.lang = lang;
+      }
     }
   }, []);
   const recognitionRef = useRef<any | null>(null);
   const isVoiceProcessingRef = useRef(false);
   const shouldListenRef = useRef(false);
+  const handleAiDirectiveSubmitRef = useRef(handleAiDirectiveSubmit);
+  useEffect(() => { handleAiDirectiveSubmitRef.current = handleAiDirectiveSubmit; }, [handleAiDirectiveSubmit]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2386,12 +2457,11 @@ export default function Dashboard() {
     }
 
     try {
-      if ((window as any).webkitSpeechRecognition || (window as any).SpeechRecognition) {
-        const recognition = new SpeechRecognitionAPI();
-      recognition.continuous = false; // Disable infinite background loops
-      recognition.interimResults = true; // Set to true to provide live transcription preview
+      const recognition = new SpeechRecognitionAPI();
+      recognition.continuous = false;
+      recognition.interimResults = true;
       recognition.maxAlternatives = 1;
-      recognition.lang = voiceLanguage; // IMPORTANT: Initialize with current language
+      recognition.lang = "bn-BD"; // Default, will be updated on toggle
 
       recognition.onresult = (event: any) => {
         let interimTranscript = "";
@@ -2410,22 +2480,18 @@ export default function Dashboard() {
         }
 
         if (finalTranscript) {
-          if (isVoiceProcessingRef.current) return; // Guard clause against double processing
+          if (isVoiceProcessingRef.current) return;
           const spokenText = finalTranscript.trim();
           console.log("Recognized:", spokenText);
           
-          // UNCONDITIONALLY update the UI first
           setVoiceTranscript(`Executing: "${spokenText}"`);
           
           const commandText = spokenText.toLowerCase();
           if (!commandText) return;
-          // Activate 2-Second Cooldown Anti-Duplicate Lock
           isVoiceProcessingRef.current = true;
 
-          // Execute NLP Mapping
-          handleAiDirectiveSubmit(commandText, "voice");
+          handleAiDirectiveSubmitRef.current(commandText, "voice");
 
-          // Release lock safely after cooldown expiration
           setTimeout(() => {
             isVoiceProcessingRef.current = false;
             setVoiceTranscript("");
@@ -2436,9 +2502,12 @@ export default function Dashboard() {
       recognition.onerror = (err: any) => {
         console.error(`${LOG} Speech recognition error:`, err);
         isVoiceProcessingRef.current = false;
-        shouldListenRef.current = false;
-        setIsListening(false);
-        toast.error("Voice recognition failed: " + err.error);
+        // Don't kill shouldListenRef on transient errors like 'no-speech'
+        if (err.error === 'aborted' || err.error === 'not-allowed') {
+          shouldListenRef.current = false;
+          setIsListening(false);
+          toast.error("Voice recognition failed: " + err.error);
+        }
       };
 
       recognition.onend = () => {
@@ -2447,6 +2516,7 @@ export default function Dashboard() {
             recognition.start();
           } catch (e) {
             console.error(`${LOG} Auto-reconnect failed:`, e);
+            shouldListenRef.current = false;
             setIsListening(false);
           }
         } else {
@@ -2455,7 +2525,6 @@ export default function Dashboard() {
       };
 
       recognitionRef.current = recognition;
-      }
     } catch (e) {
       console.error("Failed to initialize speech recognition:", e);
     }
@@ -2467,7 +2536,7 @@ export default function Dashboard() {
         } catch (e) {}
       }
     };
-  }, [handleAiDirectiveSubmit, isProcessing, voiceLanguage]);
+  }, []); // Run ONCE on mount — stable recognition object
 
   const handleVoiceToggle = useCallback(async () => {
     if (!recognitionRef.current) {
