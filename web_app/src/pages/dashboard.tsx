@@ -1839,8 +1839,12 @@ export default function Dashboard() {
   const handleResetArm = useCallback(() => {
     animateJointsTo(DEFAULT_JOINTS, "Home (reset)");
     if (commandUrl) {
+      // Send HOME macro for ESP32 to stop all joints
       sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-      sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint: "gripper", angle: 90 }).catch(e => { console.error(e); });
+      // Also send individual joint stops for reliability
+      for (const joint of ["base", "shoulder", "elbow", "wrist", "gripper"]) {
+        sendCommandViaHttp(commandUrl, { mode: "arm", action: "arm_control", joint, angle: 90 }).catch(console.error);
+      }
     }
   }, [animateJointsTo, commandUrl]);
 
@@ -2284,15 +2288,15 @@ export default function Dashboard() {
       setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
     } else {
-      // F. Individual Arm Joint Commands (Bengali + English + Banglish)
-      const hasGripper = ['গ্রিপার', 'gripper', 'grip', 'ধরন', 'চিমটা', 'claw', 'jaw', 'ক্ল'].some(k => lowerText.includes(k));
-      const hasShoulder = ['শোল্ডার', 'shoulder', 'কাঁধ', 'kandh', 'কাধ'].some(k => lowerText.includes(k));
-      const hasElbow = ['এলবো', 'elbow', 'কনুই', 'konui', 'কনু'].some(k => lowerText.includes(k));
-      const hasWrist = ['রিস্ট', 'wrist', 'কবজি', 'kobji'].some(k => lowerText.includes(k));
-      const hasBase = ['বেস', 'base', 'ঘুরাও', 'ghurao', 'rotate', 'turn', 'ঘোরাও', 'spin'].some(k => lowerText.includes(k));
+      // F. Individual Arm Joint Commands (Bengali + English + Banglish + Phonetic)
+      const hasGripper = ['গ্রিপার', 'gripper', 'grip', 'ধরন', 'চিমটা', 'claw', 'jaw', 'ক্ল', 'গ্রিপ'].some(k => lowerText.includes(k));
+      const hasShoulder = ['শোল্ডার', 'shoulder', 'কাঁধ', 'kandh', 'কাধ', 'সোল্ডার'].some(k => lowerText.includes(k));
+      const hasElbow = ['এলবো', 'elbow', 'কনুই', 'konui', 'কনু', 'এলব'].some(k => lowerText.includes(k));
+      const hasWrist = ['রিস্ট', 'wrist', 'কবজি', 'kobji', 'risk', 'rist', 'rest', 'রিষ্ট', 'রিস্', 'কব্জি'].some(k => lowerText.includes(k));
+      const hasBase = ['বেস', 'base', 'ঘুরাও', 'ghurao', 'rotate', 'turn', 'ঘোরাও', 'spin', 'bass', 'bays', 'pace', 'বেইস', 'বেজ'].some(k => lowerText.includes(k));
 
-      const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা'].some(k => lowerText.includes(k));
-      const hasDown = ['নিচে', 'niche', 'down', 'নামাও', 'নেও', 'namao', 'lower', 'নামা'].some(k => lowerText.includes(k));
+      const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা', 'উঠা', 'তুলো', 'আপ'].some(k => lowerText.includes(k));
+      const hasDown = ['নিচে', 'niche', 'down', 'নামাও', 'নেও', 'namao', 'lower', 'নামা', 'ডাউন'].some(k => lowerText.includes(k));
       const hasOpen = ['খোলো', 'খুলো', 'open', 'kholo', 'khulo', 'ওপেন', 'release'].some(k => lowerText.includes(k));
       const hasClose = ['বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'atkao', 'shut', 'clamp'].some(k => lowerText.includes(k));
       const hasLeft = ['বামে', 'বাম', 'left', 'bame'].some(k => lowerText.includes(k));
@@ -2303,10 +2307,10 @@ export default function Dashboard() {
 
       const sendJointWithAutoStop = (joint: string, angle: number) => {
         if (commandUrl) {
-          sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint, angle }).catch(console.error);
+          sendCommandViaHttp(commandUrl, { mode: "arm", action: "arm_control", joint, angle }).catch(console.error);
           // Auto-stop the motor after duration
           setTimeout(() => {
-            sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_control", joint, angle: 90 }).catch(console.error);
+            sendCommandViaHttp(commandUrl, { mode: "arm", action: "arm_control", joint, angle: 90 }).catch(console.error);
           }, JOINT_RUN_MS);
         }
       };
@@ -2373,9 +2377,17 @@ export default function Dashboard() {
     // Enforce strict English rejection in Bengali mode
     if (source === "voice" && voiceLanguageRef.current === "bn-BD") {
       const realBengaliWords = [
+        // Drive keywords
         'সামনে', 'আগা', 'এগিয়ে', 'পিছনে', 'পেছনে', 'বামে', 'ডানে', 'থামো', 'দাঁড়াও', 'তোল', 'উঠাও', 'ধরো', 'নাও', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ',
         'জায়গা', 'সোজা', 'ঘুরে', 'চারপাশ', 'দেখ', 'খুঁজ', 'নাচ', 'লাল', 'নীল', 'সবুজ', 'হলুদ', 'কালো', 'সাদা', 'বস্তু', 'বল', 'জিনিস', 'গিয়ে', 'করো', 'দাও',
-        'গ্রিপার', 'শোল্ডার', 'এলবো', 'রিস্ট', 'বেস', 'কাঁধ', 'কনুই', 'কবজি', 'খোলো', 'খুলো', 'বন্ধ', 'ওপরে', 'উপরে', 'নিচে', 'নামাও', 'ঘুরাও', 'আটকাও', 'চিমটা', 'ধরন'
+        // Arm joint keywords
+        'গ্রিপার', 'শোল্ডার', 'এলবো', 'রিস্ট', 'বেস', 'কাঁধ', 'কনুই', 'কবজি', 'খোলো', 'খুলো', 'বন্ধ', 'ওপরে', 'উপরে', 'নিচে', 'নামাও', 'ঘুরাও', 'আটকাও', 'চিমটা', 'ধরন',
+        // Additional Bengali arm words
+        'রিষ্ট', 'কব্জি', 'কাধ', 'কনু', 'এলব', 'গ্রিপ', 'ক্ল', 'ঘোরাও', 'সোল্ডার', 'বেইস', 'বেজ',
+        // Direction words
+        'উঠা', 'তুলো', 'ওঠা', 'ডাউন', 'আপ', 'ওঠাও', 'তোলো', 'যাও', 'নেও', 'ঘুরাও',
+        // Bengali mode home/reset
+        'হোম', 'রিসেট', 'রিসো', 'পিকআপ', 'পিক', 'ড্রপ', 'রিলিজ'
       ];
       const hasRealBengaliWord = realBengaliWords.some(k => lowerText.includes(k));
       if (!hasRealBengaliWord) {
@@ -2402,16 +2414,16 @@ export default function Dashboard() {
       'লাল', 'red', 'নীল', 'blue', 'সবুজ', 'green', 'হলুদ', 'yellow', 'কালো', 'black', 'সাদা', 'white', 'shada', 'sada', 'হোয়াইট', 'গ্রিন', 'ব্লু', 'ইয়েলো', 'ব্ল্যাক', 'রেড',
       // Object words
       'বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu', 'অবজেক্ট',
-      // Individual arm joint keywords
-      'gripper', 'grip', 'গ্রিপার', 'চিমটা', 'ধরন', 'claw', 'jaw', 'ক্ল',
-      'shoulder', 'শোল্ডার', 'কাঁধ', 'kandh', 'কাধ',
-      'elbow', 'এলবো', 'কনুই', 'konui', 'কনু',
-      'wrist', 'রিস্ট', 'কবজি', 'kobji',
-      'base', 'বেস', 'ঘুরাও', 'ghurao', 'rotate', 'turn', 'ঘোরাও', 'spin',
+      // Individual arm joint keywords (with phonetic variations for speech recognition)
+      'gripper', 'grip', 'গ্রিপার', 'চিমটা', 'ধরন', 'claw', 'jaw', 'ক্ল', 'গ্রিপ',
+      'shoulder', 'শোল্ডার', 'কাঁধ', 'kandh', 'কাধ', 'সোল্ডার',
+      'elbow', 'এলবো', 'কনুই', 'konui', 'কনু', 'এলব',
+      'wrist', 'রিস্ট', 'কবজি', 'kobji', 'risk', 'rist', 'rest', 'রিষ্ট', 'কব্জি',
+      'base', 'বেস', 'ঘুরাও', 'ghurao', 'rotate', 'turn', 'ঘোরাও', 'spin', 'bass', 'bays', 'pace', 'বেইস', 'বেজ',
       'খোলো', 'খুলো', 'open', 'kholo', 'ওপেন', 'release',
       'বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'shut', 'clamp',
-      'উপরে', 'ওপরে', 'up', 'upore', 'raise',
-      'নিচে', 'niche', 'down', 'নামাও', 'নেও', 'lower'
+      'উপরে', 'ওপরে', 'up', 'upore', 'raise', 'উঠা', 'তুলো', 'আপ',
+      'নিচে', 'niche', 'down', 'নামাও', 'নেও', 'lower', 'ডাউন'
     ].some(k => lowerText.includes(k));
 
     if (isNavCommand) {
