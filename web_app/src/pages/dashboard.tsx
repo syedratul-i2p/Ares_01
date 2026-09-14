@@ -2238,43 +2238,20 @@ export default function Dashboard() {
       return;
     }
 
-    // E. Standard Continuous Driving & Arm Single Commands
-    if (hasDriveKeyword) {
-      appendLog(`[${timestamp}] [NAV] Propulsion system initialized: FORWARD.`);
-      setDriveDirection("FORWARD");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "FORWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    } else if (hasReverseKeyword) {
-      appendLog(`[${timestamp}] [NAV] Propulsion system initialized: BACKWARD.`);
-      setDriveDirection("BACKWARD");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "BACKWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    } else if (['বামে', 'বাম', 'left', 'বাঁয়ে', 'বাঁয়ে', 'bame', 'bam'].some(k => lowerText.includes(k))) {
-      appendLog(`[${timestamp}] [NAV] Propulsion system initialized: LEFT.`);
-      setDriveDirection("LEFT");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "LEFT", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    } else if (['ডানে', 'ডান', 'right', 'ডানদিকে', 'daine', 'dan'].some(k => lowerText.includes(k))) {
-      appendLog(`[${timestamp}] [NAV] Propulsion system initialized: RIGHT.`);
-      setDriveDirection("RIGHT");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "RIGHT", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    } else if (['থামো', 'দাঁড়াও', 'দাঁড়াও', 'দাড়াও', 'থাম', 'দারান', 'দাঁড়ান', 'stop', 'halt', 'break', 'thamo', 'dara', 'thak'].some(k => lowerText.includes(k))) {
-      appendLog(`[${timestamp}] [NAV] Propulsion system halted: STOP.`);
-      setDriveDirection("STOP");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-      setAiTaskState("idle");
-    }
-
-    // F. Individual Arm Joint Commands — CHECK FIRST before macros to avoid conflicts
+    // E. Individual Arm Joint Commands — CHECK FIRST before drive to avoid conflicts
     const hasGripper = ['গ্রিপার', 'gripper', 'grip', 'ধরন', 'চিমটা', 'claw', 'jaw', 'ক্ল', 'গ্রিপ'].some(k => lowerText.includes(k));
     const hasShoulder = ['শোল্ডার', 'shoulder', 'কাঁধ', 'kandh', 'কাধ', 'সোল্ডার'].some(k => lowerText.includes(k));
     const hasElbow = ['এলবো', 'elbow', 'কনুই', 'konui', 'কনু', 'এলব'].some(k => lowerText.includes(k));
     const hasWrist = ['রিস্ট', 'wrist', 'কবজি', 'kobji', 'risk', 'rist', 'rest', 'রিষ্ট', 'রিস্', 'কব্জি'].some(k => lowerText.includes(k));
-    const hasBaseJoint = ['বেস', 'base', 'ঘুরাও', 'ghurao', 'rotate', 'turn', 'ঘোরাও', 'spin', 'bass', 'bays', 'pace', 'বেইস', 'বেজ'].some(k => lowerText.includes(k));
+    // Removed generic words like 'turn', 'rotate', 'spin', 'ঘুরাও', 'ঘোরাও' so 'turn left' doesn't trigger base
+    const hasBaseJoint = ['বেস', 'base', 'bass', 'bays', 'pace', 'বেইস', 'বেজ'].some(k => lowerText.includes(k));
 
-    const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা', 'উঠা', 'তুলো', 'আপ'].some(k => lowerText.includes(k));
+    const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা', 'উঠা', 'তুলো', 'আপ', 'উড়াও', 'উডাও', 'ওঠো', 'ও', 'udao', 'urao'].some(k => lowerText.includes(k));
     const hasDown = ['নিচে', 'niche', 'down', 'নামাও', 'নেও', 'namao', 'lower', 'নামা', 'ডাউন'].some(k => lowerText.includes(k));
     const hasOpen = ['খোলো', 'খুলো', 'open', 'kholo', 'khulo', 'ওপেন', 'release'].some(k => lowerText.includes(k));
     const hasClose = ['বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'atkao', 'shut', 'clamp'].some(k => lowerText.includes(k));
-    const hasLeft = ['বামে', 'বাম', 'left', 'bame'].some(k => lowerText.includes(k));
-    const hasRight = ['ডানে', 'ডান', 'right', 'daine'].some(k => lowerText.includes(k));
+    const hasLeft = ['বামে', 'বাম', 'left', 'bame', 'বাঁয়ে', 'বাঁয়ে'].some(k => lowerText.includes(k));
+    const hasRight = ['ডানে', 'ডান', 'right', 'daine', 'dan', 'ডানদিকে'].some(k => lowerText.includes(k));
 
     // Auto-stop duration for DC motors (ms)
     const JOINT_RUN_MS = 1500;
@@ -2289,40 +2266,42 @@ export default function Dashboard() {
 
     const hasAnyJoint = hasGripper || hasShoulder || hasElbow || hasWrist || hasBaseJoint;
 
-    if (hasGripper) {
-      if (hasOpen) {
-        appendLog(`[${timestamp}] [ARM] Gripper: OPENING.`);
-        setJoints(prev => ({ ...prev, gripper: 0 }));
-        sendJointWithAutoStop("gripper", 0);
-      } else if (hasClose) {
-        appendLog(`[${timestamp}] [ARM] Gripper: CLOSING.`);
-        setJoints(prev => ({ ...prev, gripper: 180 }));
-        sendJointWithAutoStop("gripper", 180);
-      } else {
-        appendLog(`[${timestamp}] [ARM] Gripper: OPENING (default).`);
-        setJoints(prev => ({ ...prev, gripper: 0 }));
-        sendJointWithAutoStop("gripper", 0);
+    if (hasAnyJoint) {
+      if (hasGripper) {
+        if (hasOpen) {
+          appendLog(`[${timestamp}] [ARM] Gripper: OPENING.`);
+          setJoints(prev => ({ ...prev, gripper: 0 }));
+          sendJointWithAutoStop("gripper", 0);
+        } else if (hasClose) {
+          appendLog(`[${timestamp}] [ARM] Gripper: CLOSING.`);
+          setJoints(prev => ({ ...prev, gripper: 180 }));
+          sendJointWithAutoStop("gripper", 180);
+        } else {
+          appendLog(`[${timestamp}] [ARM] Gripper: OPENING (default).`);
+          setJoints(prev => ({ ...prev, gripper: 0 }));
+          sendJointWithAutoStop("gripper", 0);
+        }
+      } else if (hasShoulder) {
+        const angle = hasUp ? 180 : hasDown ? 0 : 90;
+        appendLog(`[${timestamp}] [ARM] Shoulder: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
+        setJoints(prev => ({ ...prev, shoulder: angle }));
+        sendJointWithAutoStop("shoulder", angle);
+      } else if (hasElbow) {
+        const angle = hasUp ? 180 : hasDown ? 0 : 90;
+        appendLog(`[${timestamp}] [ARM] Elbow: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
+        setJoints(prev => ({ ...prev, elbow: angle }));
+        sendJointWithAutoStop("elbow", angle);
+      } else if (hasWrist) {
+        const angle = hasUp ? 180 : hasDown ? 0 : 90;
+        appendLog(`[${timestamp}] [ARM] Wrist: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
+        setJoints(prev => ({ ...prev, wrist: angle }));
+        sendJointWithAutoStop("wrist", angle);
+      } else if (hasBaseJoint) {
+        const angle = hasLeft ? 0 : hasRight ? 180 : 90;
+        appendLog(`[${timestamp}] [ARM] Base: ${hasLeft ? 'LEFT' : hasRight ? 'RIGHT' : 'STOP'}.`);
+        setJoints(prev => ({ ...prev, base: angle }));
+        sendJointWithAutoStop("base", angle);
       }
-    } else if (hasShoulder) {
-      const angle = hasUp ? 180 : hasDown ? 0 : 90;
-      appendLog(`[${timestamp}] [ARM] Shoulder: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
-      setJoints(prev => ({ ...prev, shoulder: angle }));
-      sendJointWithAutoStop("shoulder", angle);
-    } else if (hasElbow) {
-      const angle = hasUp ? 180 : hasDown ? 0 : 90;
-      appendLog(`[${timestamp}] [ARM] Elbow: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
-      setJoints(prev => ({ ...prev, elbow: angle }));
-      sendJointWithAutoStop("elbow", angle);
-    } else if (hasWrist) {
-      const angle = hasUp ? 180 : hasDown ? 0 : 90;
-      appendLog(`[${timestamp}] [ARM] Wrist: ${hasUp ? 'UP' : hasDown ? 'DOWN' : 'STOP'}.`);
-      setJoints(prev => ({ ...prev, wrist: angle }));
-      sendJointWithAutoStop("wrist", angle);
-    } else if (hasBaseJoint) {
-      const angle = hasLeft ? 0 : hasRight ? 180 : 90;
-      appendLog(`[${timestamp}] [ARM] Base: ${hasLeft ? 'LEFT' : hasRight ? 'RIGHT' : 'STOP'}.`);
-      setJoints(prev => ({ ...prev, base: angle }));
-      sendJointWithAutoStop("base", angle);
     } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal'].some(k => lowerText.includes(k))) {
       // G. Home/Reset — only if no joint name was specified
       appendLog(`[${timestamp}] [ARM] Manipulator system homing sequence initiated.`);
@@ -2330,6 +2309,30 @@ export default function Dashboard() {
       setJoints(homeState);
       if (commandUrl) {
         sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+      }
+    } else {
+      // H. Standard Continuous Driving (Only if no Arm/Home commands matched)
+      if (hasDriveKeyword) {
+        appendLog(`[${timestamp}] [NAV] Propulsion system initialized: FORWARD.`);
+        setDriveDirection("FORWARD");
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "FORWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+      } else if (hasReverseKeyword) {
+        appendLog(`[${timestamp}] [NAV] Propulsion system initialized: BACKWARD.`);
+        setDriveDirection("BACKWARD");
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "BACKWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+      } else if (hasLeft) {
+        appendLog(`[${timestamp}] [NAV] Propulsion system initialized: LEFT.`);
+        setDriveDirection("LEFT");
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "LEFT", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+      } else if (hasRight) {
+        appendLog(`[${timestamp}] [NAV] Propulsion system initialized: RIGHT.`);
+        setDriveDirection("RIGHT");
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "RIGHT", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+      } else if (['থামো', 'দাঁড়াও', 'দাঁড়াও', 'দাড়াও', 'থাম', 'দারান', 'দাঁড়ান', 'stop', 'halt', 'break', 'thamo', 'dara', 'thak'].some(k => lowerText.includes(k))) {
+        appendLog(`[${timestamp}] [NAV] Propulsion system halted: STOP.`);
+        setDriveDirection("STOP");
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+        setAiTaskState("idle");
       }
     }
 
@@ -2366,7 +2369,7 @@ export default function Dashboard() {
         // Additional Bengali arm words
         'রিষ্ট', 'কব্জি', 'কাধ', 'কনু', 'এলব', 'গ্রিপ', 'ক্ল', 'ঘোরাও', 'সোল্ডার', 'বেইস', 'বেজ',
         // Direction words
-        'উঠা', 'তুলো', 'ওঠা', 'ডাউন', 'আপ', 'ওঠাও', 'তোলো', 'যাও', 'নেও', 'ঘুরাও',
+        'উঠা', 'তুলো', 'ওঠা', 'ডাউন', 'আপ', 'ওঠাও', 'তোলো', 'যাও', 'নেও', 'ঘুরাও', 'উড়াও', 'উডাও', 'ওঠো', 'ও',
         // Bengali mode home/reset
         'হোম', 'রিসেট', 'রিসো', 'পিকআপ', 'পিক', 'ড্রপ', 'রিলিজ'
       ];
@@ -2385,7 +2388,7 @@ export default function Dashboard() {
       'বামে', 'বাম', 'left', 'বাঁয়ে', 'bame', 'bam',
       'ডানে', 'ডান', 'right', 'ডানদিকে', 'daine', 'dan',
       'থামো', 'দাঁড়াও', 'দাড়াও', 'থাম', 'দারান', 'দাঁড়ান', 'stop', 'halt', 'break', 'thamo', 'dara', 'thak',
-      'তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tulo', 'tolo', 'uthao', 'dhoro', 'pikap', 'উঠা', 'তুলে', 'ওঠাও', 'collect', 'lift', 'পিকআপ', 'পিক',
+      'তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tulo', 'tolo', 'uthao', 'dhoro', 'pikap', 'উঠা', 'তুলে', 'ওঠাও', 'collect', 'lift', 'পিকআপ', 'পিক', 'উড়াও', 'উডাও', 'ওঠো', 'ও', 'udao', 'urao',
       'ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo', 'ড্রপ', 'রিলিজ',
       'হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal',
       'চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo', 'স্ক্যান', 'সার্চ',
