@@ -1042,12 +1042,30 @@ const ArmControls = React.memo(function ArmControls({
         </div>
       </div>
       <button
-        className="arm-reset-bottom group w-full mt-2 text-sm gap-2 h-9 rounded-lg border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 hover:from-emerald-500/25 hover:to-cyan-500/25 text-emerald-400 hover:text-emerald-300 transition-all duration-300 flex items-center justify-center cursor-pointer shadow-lg hover:shadow-emerald-500/20 active:scale-95 font-semibold tracking-wide"
+        className="arm-reset-bottom group w-full mt-2 text-sm gap-2.5 h-10 rounded-lg border border-emerald-500/40 bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 hover:from-emerald-500/30 hover:to-cyan-500/30 text-emerald-400 hover:text-emerald-300 transition-all duration-300 flex items-center justify-center cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.15)] hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] active:scale-[0.98] font-semibold tracking-wide"
         onClick={handleResetArm}
         data-testid="btn-arm-reset-bottom"
       >
-        <RotateCcw className="w-4 h-4 group-hover:animate-spin transition-transform" />
-        🏠 Reset Arm to Home
+        <RotateCcw className="w-4 h-4 group-hover:-rotate-180 transition-transform duration-700 ease-in-out" />
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-80 group-hover:opacity-100 transition-opacity">
+          {/* Base */}
+          <path d="M7 22h10" />
+          <path d="M12 22v-4" />
+          {/* Joint 1 */}
+          <circle cx="12" cy="18" r="2" />
+          {/* Segment 1 */}
+          <path d="M12 16v-6" />
+          {/* Joint 2 */}
+          <circle cx="12" cy="10" r="2" />
+          {/* Segment 2 (angled) */}
+          <path d="M13.5 8.5l4-4" />
+          {/* Gripper Base */}
+          <circle cx="18.5" cy="3.5" r="1.5" />
+          {/* Gripper claws */}
+          <path d="M19 2l2 -1" />
+          <path d="M17 3l-1 -2" />
+        </svg>
+        <span>Reset Arm to Home</span>
       </button>
     </div>
   );
