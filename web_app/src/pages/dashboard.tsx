@@ -1842,14 +1842,12 @@ export default function Dashboard() {
   }, [joints]);
 
   const handleResetArm = useCallback(() => {
-    animateJointsTo(DEFAULT_JOINTS, "Home (reset)");
+    // Update UI slider states to Home (90 degrees, gripper open)
+    const homeState = { base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 };
+    animateJointsTo(homeState, "Home (reset)");
     if (commandUrl) {
-      // Send HOME macro for ESP32 to stop all joints
+      // Send HOME macro for ESP32 to run the mechanical homing sequence
       sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-      // Also send individual joint stops for reliability
-      for (const joint of ["base", "shoulder", "elbow", "wrist", "gripper"]) {
-        sendCommandViaHttp(commandUrl, { mode: "arm", action: "arm_control", joint, angle: 90 }).catch(console.error);
-      }
     }
   }, [animateJointsTo, commandUrl]);
 
@@ -2327,13 +2325,11 @@ export default function Dashboard() {
       sendJointWithAutoStop("base", angle);
     } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal'].some(k => lowerText.includes(k))) {
       // G. Home/Reset — only if no joint name was specified
-      appendLog(`[${timestamp}] [ARM] Manipulator system homed. Safety constraints enforced.`);
-      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
+      appendLog(`[${timestamp}] [ARM] Manipulator system homing sequence initiated.`);
+      const homeState = { base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 };
+      setJoints(homeState);
       if (commandUrl) {
         sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-        for (const joint of ["base", "shoulder", "elbow", "wrist", "gripper"]) {
-          sendCommandViaHttp(commandUrl, { mode: "arm", action: "arm_control", joint, angle: 90 }).catch(console.error);
-        }
       }
     }
 

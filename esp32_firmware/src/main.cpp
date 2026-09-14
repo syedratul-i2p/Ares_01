@@ -139,6 +139,33 @@ void dropMacroTask(void *pvParameters) {
   vTaskDelete(NULL);
 }
 
+void homeMacroTask(void *pvParameters) {
+  // Phase 1: Open gripper to release any payload safely
+  Hardware.setArmMotor("gripper", "", 0);
+  vTaskDelay(pdMS_TO_TICKS(1000));
+  Hardware.setArmMotor("gripper", "", 90);
+
+  // Phase 2: Drive all arm joints UP/BACK (180 direction) to reach the mechanical limits (Home posture like WLKATA Mirobot)
+  Hardware.setArmMotor("shoulder", "", 180);
+  Hardware.setArmMotor("elbow", "", 180);
+  Hardware.setArmMotor("wrist", "", 180);
+  // Optional: Rotate base slightly? We don't have absolute position for base, so best to leave it stopped or just stop it.
+  Hardware.setArmMotor("base", "", 90);
+  
+  // Run motors UP for 2.0 seconds to ensure they reach the top/home position
+  vTaskDelay(pdMS_TO_TICKS(2000));
+
+  // Phase 3: Stop all motors
+  Hardware.setArmMotor("base", "", 90);
+  Hardware.setArmMotor("shoulder", "", 90);
+  Hardware.setArmMotor("elbow", "", 90);
+  Hardware.setArmMotor("wrist", "", 90);
+  Hardware.setArmMotor("gripper", "", 90);
+
+  macroTaskHandle = NULL;
+  vTaskDelete(NULL);
+}
+
 void executeHardwareCommand(String mode, String action, String direction,
                             int speed, String joint, int angle) {
   ESP_LOGI(TAG_SYS,
@@ -178,10 +205,7 @@ void executeHardwareCommand(String mode, String action, String direction,
     } else if (direction == "HOME" || direction == "RESET") {
       if (macroTaskHandle != NULL) { vTaskDelete(macroTaskHandle); macroTaskHandle = NULL; }
       Hardware.setArmMotor("base", "", 90);
-      Hardware.setArmMotor("shoulder", "", 90);
-      Hardware.setArmMotor("elbow", "", 90);
-      Hardware.setArmMotor("wrist", "", 90);
-      Hardware.setArmMotor("gripper", "", 90);
+      xTaskCreatePinnedToCore(homeMacroTask, "HomeTask", 2048, NULL, 1, &macroTaskHandle, 1);
     }
     return;
   }
