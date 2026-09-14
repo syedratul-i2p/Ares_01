@@ -2352,6 +2352,9 @@ export default function Dashboard() {
     appendLog(`[${timestamp}] [SYS] Local parser sequence completed successfully.`);
   }, [commandUrl]);
 
+  // Voice language ref — accessible before the voice state block is declared
+  const voiceLanguageRef = useRef("bn-BD");
+
   const handleAiDirectiveSubmit = useCallback(async (overrideText?: string | any, source: "ai" | "voice" = "ai") => {
     const rawTextToProcess = typeof overrideText === 'string' ? overrideText : directiveInput;
     if (typeof rawTextToProcess !== 'string' || !rawTextToProcess.trim() || isProcessing || isExecutingRef.current) return;
@@ -2368,7 +2371,7 @@ export default function Dashboard() {
     const lowerText = textToProcess.toLowerCase();
 
     // Enforce strict English rejection in Bengali mode
-    if (source === "voice" && voiceLanguage === "bn-BD") {
+    if (source === "voice" && voiceLanguageRef.current === "bn-BD") {
       const realBengaliWords = [
         'সামনে', 'আগা', 'এগিয়ে', 'পিছনে', 'পেছনে', 'বামে', 'ডানে', 'থামো', 'দাঁড়াও', 'তোল', 'উঠাও', 'ধরো', 'নাও', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ',
         'জায়গা', 'সোজা', 'ঘুরে', 'চারপাশ', 'দেখ', 'খুঁজ', 'নাচ', 'লাল', 'নীল', 'সবুজ', 'হলুদ', 'কালো', 'সাদা', 'বস্তু', 'বল', 'জিনিস', 'গিয়ে', 'করো', 'দাও',
@@ -2425,7 +2428,7 @@ export default function Dashboard() {
     setTimeout(() => {
         setIsProcessing(false);
     }, 500);
-  }, [directiveInput, isProcessing, commandUrl, executeLocalKeywordFallback, executeAutonomousDirective, voiceLanguage]);
+  }, [directiveInput, isProcessing, commandUrl, executeLocalKeywordFallback, executeAutonomousDirective]);
 
 
 
@@ -2437,6 +2440,7 @@ export default function Dashboard() {
   const [voiceLanguage, setVoiceLanguageState] = useState("bn-BD");
   const setVoiceLanguage = useCallback(async (lang: string) => {
     setVoiceLanguageState(lang);
+    voiceLanguageRef.current = lang;
     // Update the recognition object's lang property directly
     if (recognitionRef.current) {
       if (shouldListenRef.current) {
