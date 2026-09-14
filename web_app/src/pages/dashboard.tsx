@@ -2246,7 +2246,7 @@ export default function Dashboard() {
     // Removed generic words like 'turn', 'rotate', 'spin', 'ঘুরাও', 'ঘোরাও' so 'turn left' doesn't trigger base
     const hasBaseJoint = ['বেস', 'base', 'bass', 'bays', 'pace', 'বেইস', 'বেজ'].some(k => lowerText.includes(k));
 
-    const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা', 'উঠা', 'তুলো', 'আপ', 'উড়াও', 'উডাও', 'ওঠো', 'ও', 'udao', 'urao'].some(k => lowerText.includes(k));
+    const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা', 'উঠা', 'তুলো', 'আপ', 'উড়াও', 'উডাও', 'ওঠো', 'udao', 'urao'].some(k => lowerText.includes(k)) || lowerText.split(/\s+/).includes('ও');
     const hasDown = ['নিচে', 'niche', 'down', 'নামাও', 'নেও', 'namao', 'lower', 'নামা', 'ডাউন'].some(k => lowerText.includes(k));
     const hasOpen = ['খোলো', 'খুলো', 'open', 'kholo', 'khulo', 'ওপেন', 'release'].some(k => lowerText.includes(k));
     const hasClose = ['বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'atkao', 'shut', 'clamp'].some(k => lowerText.includes(k));
