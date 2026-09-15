@@ -1065,61 +1065,91 @@ const ArmControls = React.memo(function ArmControls({
 });
 
 
-// ─── Coordinate Control Panel (WLKATA Style) ──────────────────────────────────
 const CoordinateControlPanel = React.memo(function CoordinateControlPanel({
   joints,
-  commandUrl
+  commandUrl,
+  onExecuteSequence
 }: {
   joints: ArmAngles;
   commandUrl: string;
+  onExecuteSequence?: (seq: {joint: keyof ArmAngles, angle: number}[]) => void;
 }) {
   const [localCoords, setLocalCoords] = useState<ArmAngles>({ ...joints });
+  const [sequence, setSequence] = useState<(keyof ArmAngles)[]>([]);
 
-  // Sync local coords when actual joints change
+  // Sync local coords when actual joints change, but skip edited ones
   useEffect(() => {
-    setLocalCoords(joints);
-  }, [joints]);
+    setLocalCoords(prev => {
+      const next = { ...prev };
+      for (const k of JOINT_ORDER) {
+        if (!sequence.includes(k)) {
+          next[k] = joints[k];
+        }
+      }
+      return next;
+    });
+  }, [joints, sequence]);
 
   const handleChange = (key: keyof ArmAngles, val: string) => {
     setLocalCoords(prev => ({ ...prev, [key]: Number(val) }));
+    if (!sequence.includes(key)) {
+      setSequence(prev => [...prev, key]);
+    }
   };
 
   const handleExecute = () => {
-    // In a real system with encoders, this would send an absolute position command.
-    // Since this is a DC motor sim, we'll visually update and trigger the joint macros
-    // if an actual backend API supported it. For now, it satisfies the WLKATA coordinate UI request.
-    // If we wanted to actually move it, we would dispatch the `arm_control` HTTP request.
-    JOINT_ORDER.forEach(key => {
-      const targetAngle = localCoords[key];
-      if (targetAngle !== joints[key]) {
-        // Just send a visual start command for the specific angle if backend supported absolute positioning
-        // This simulates the behavior for the UI.
-        if (commandUrl) {
-           // Simulating absolute positioning
-        }
+    if (sequence.length > 0) {
+      if (onExecuteSequence) {
+        const seq = sequence.map(k => ({ joint: k, angle: localCoords[k] }));
+        onExecuteSequence(seq);
       }
-    });
-    toast.success("Coordinates dispatched to ARM");
+      toast.success("Executing sequence...");
+      setSequence([]);
+    } else {
+      toast.info("No sequence to execute. Adjust values first.");
+    }
+  };
+
+  const handleClear = () => {
+    setSequence([]);
+    setLocalCoords({ ...joints });
   };
 
   return (
-    <div className="w-full h-full bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-white/10 rounded-xl p-2.5 backdrop-blur-md shadow-sm dark:shadow-lg flex flex-col">
-      <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1.5 flex items-center gap-1.5 shrink-0 whitespace-nowrap">
-        <MapPin className="w-3 h-3 text-cyan-600 dark:text-cyan-500" />
-        Coordinate Control
+    <div className="w-full h-full bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-white/10 rounded-xl p-2.5 backdrop-blur-md shadow-sm dark:shadow-lg flex flex-col relative">
+      <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-1.5">
+          <MapPin className="w-3 h-3 text-cyan-600 dark:text-cyan-500" />
+          Coordinates
+        </div>
+        {sequence.length > 0 && (
+          <button onClick={handleClear} className="flex items-center gap-1 text-[9px] font-bold text-red-500 hover:text-red-600 bg-red-500/10 hover:bg-red-500/20 px-1.5 py-0.5 rounded transition-colors uppercase tracking-widest ml-1" title="Clear Sequence">
+            <RotateCcw className="w-2.5 h-2.5" />
+            CLR
+          </button>
+        )}
       </div>
       <div className="flex flex-col gap-1.5 mb-2.5 flex-1 justify-between">
-        {JOINT_ORDER.map(key => (
-          <div key={key} className="flex items-center justify-between bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-white/5 px-3 py-1 relative group hover:border-cyan-400 dark:hover:border-cyan-500/50 transition-colors shadow-[inset_0_1px_3px_rgba(0,0,0,0.02)]">
-            <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{JOINT_CONFIG[key].label}</span>
-            <input 
-              type="number"
-              value={localCoords[key]}
-              onChange={(e) => handleChange(key, e.target.value)}
-              className="w-12 h-5 bg-transparent text-right text-[11px] font-mono font-bold text-slate-900 dark:text-white outline-none focus:text-cyan-600 dark:focus:text-cyan-400 transition-colors"
-            />
-          </div>
-        ))}
+        {JOINT_ORDER.map(key => {
+          const seqIndex = sequence.indexOf(key);
+          const inSeq = seqIndex !== -1;
+          return (
+            <div key={key} className={`flex items-center justify-between bg-slate-100 dark:bg-slate-800 rounded-lg border ${inSeq ? 'border-cyan-400 dark:border-cyan-500' : 'border-slate-200 dark:border-white/5'} px-3 py-1 relative group hover:border-cyan-400 dark:hover:border-cyan-500/50 transition-colors shadow-[inset_0_1px_3px_rgba(0,0,0,0.02)]`}>
+              {inSeq && (
+                <div className="absolute -left-1.5 -top-1.5 w-4 h-4 bg-cyan-500 text-white rounded-full flex items-center justify-center text-[9px] font-bold shadow-md z-10 border border-white dark:border-slate-800">
+                  {seqIndex + 1}
+                </div>
+              )}
+              <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{JOINT_CONFIG[key].label}</span>
+              <input 
+                type="number"
+                value={localCoords[key]}
+                onChange={(e) => handleChange(key, e.target.value)}
+                className={`w-12 h-5 bg-transparent text-right text-[11px] font-mono font-bold ${inSeq ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-900 dark:text-white'} outline-none transition-colors`}
+              />
+            </div>
+          );
+        })}
       </div>
       <button 
         onClick={handleExecute}
@@ -1911,6 +1941,14 @@ export default function Dashboard() {
     }
   }, [animateJointsTo, commandUrl]);
 
+  const handleExecuteSequence = useCallback(async (seq: {joint: keyof ArmAngles, angle: number}[]) => {
+    for (const step of seq) {
+      setJointAngle(step.joint, step.angle);
+      // Wait for movement to "complete" before next step.
+      await new Promise(resolve => setTimeout(resolve, 800));
+    }
+  }, [setJointAngle]);
+
   const applyPreset = useCallback((p: typeof ARM_PRESETS[0]) => {
     animateJointsTo(p.joints, `Preset: ${p.name}`);
     if (commandUrl) {
@@ -2304,7 +2342,7 @@ export default function Dashboard() {
     const hasElbow = ['এলবো', 'elbow', 'কনুই', 'konui', 'কনু', 'এলব'].some(k => lowerText.includes(k));
     const hasWrist = ['রিস্ট', 'wrist', 'কবজি', 'kobji', 'risk', 'rist', 'rest', 'রিষ্ট', 'রিস্', 'কব্জি'].some(k => lowerText.includes(k));
     // Removed generic words like 'turn', 'rotate', 'spin', 'ঘুরাও', 'ঘোরাও' so 'turn left' doesn't trigger base
-    const hasBaseJoint = ['বেস', 'base', 'bass', 'bays', 'pace', 'বেইস', 'বেজ', 'বেশ', 'baze', 'bej', 'bez', 'vesh', 'bes', 'besh'].some(k => lowerText.includes(k));
+    const hasBaseJoint = ['বেস', 'base', 'bass', 'bays', 'pace', 'বেইস', 'বেজ', 'বেশ', 'baze', 'bej', 'bez', 'vesh', 'bes', 'besh', 'বেস্ট', 'best', 'ব্যাস', 'byas', 'ফেস', 'face', 'দেশ', 'desh', 'গেস', 'guess', 'ব্রেস', 'brace', 'পেস', 'pesh', 'pes', 'bace', 'vas', 'vash', 'ভেজ', 'vej'].some(k => lowerText.includes(k));
 
     const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা', 'উঠা', 'তুলো', 'আপ', 'উড়াও', 'উডাও', 'ওঠো', 'udao', 'urao'].some(k => lowerText.includes(k)) || lowerText.split(/\s+/).includes('ও');
     const hasDown = ['নিচে', 'niche', 'down', 'নামাও', 'নেও', 'namao', 'lower', 'নামা', 'ডাউন'].some(k => lowerText.includes(k));
@@ -2424,6 +2462,7 @@ export default function Dashboard() {
         // Drive keywords
         'সামনে', 'আগা', 'এগিয়ে', 'পিছনে', 'পেছনে', 'বামে', 'ডানে', 'থামো', 'দাঁড়াও', 'তোল', 'উঠাও', 'ধরো', 'নাও', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ',
         'জায়গা', 'সোজা', 'ঘুরে', 'চারপাশ', 'দেখ', 'খুঁজ', 'নাচ', 'লাল', 'নীল', 'সবুজ', 'হলুদ', 'কালো', 'সাদা', 'বস্তু', 'বল', 'জিনিস', 'গিয়ে', 'করো', 'দাও',
+        'রোভার', 'রোবার', 'gari', 'গাড়ি', 'car', 'rover',
         // Arm joint keywords
         'গ্রিপার', 'শোল্ডার', 'এলবো', 'রিস্ট', 'বেস', 'কাঁধ', 'কনুই', 'কবজি', 'খোলো', 'খুলো', 'খোলা', 'বন্ধ', 'ওপরে', 'উপরে', 'নিচে', 'নামাও', 'ঘুরাও', 'আটকাও', 'চিমটা', 'ধরন',
         // Additional Bengali arm words
@@ -2898,7 +2937,11 @@ export default function Dashboard() {
 
                     {/* RIGHT: Coordinate Control Panel */}
                     <div className="shrink-0 w-[190px] flex flex-col justify-start">
-                      <CoordinateControlPanel joints={joints} commandUrl={commandUrl} />
+                      <CoordinateControlPanel 
+                        joints={joints} 
+                        commandUrl={commandUrl} 
+                        onExecuteSequence={handleExecuteSequence}
+                      />
                     </div>
                   </div>
 
