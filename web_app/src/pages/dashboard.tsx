@@ -154,13 +154,13 @@ const JOINT_CONFIG = {
 const JOINT_ORDER = ["base", "shoulder", "elbow", "wrist", "gripper"] as const;
 
 const ARM_PRESETS = [
-  { name: "Home",  joints: { base: 85, shoulder: 63,  elbow: 74,  wrist: 42, gripper: 122 } },
+  { name: "Home",  joints: { base: 90, shoulder: 90,  elbow: 90,  wrist: 90, gripper: 90  } },
   { name: "Pick",  joints: { base: 90, shoulder: 45,  elbow: 135, wrist: 90, gripper: 180 } },
   { name: "Drop",  joints: { base: 45, shoulder: 60,  elbow: 90,  wrist: 45, gripper: 90  } },
   { name: "Reach", joints: { base: 90, shoulder: 150, elbow: 150, wrist: 90, gripper: 90  } },
 ];
 
-const DEFAULT_JOINTS: ArmAngles = { base: 85, shoulder: 63, elbow: 74, wrist: 42, gripper: 122 };
+const DEFAULT_JOINTS: ArmAngles = { base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 };
 
 // ─── Sub-Components (Memoized to prevent unnecessary re-renders) ───────────────
 
@@ -1805,7 +1805,27 @@ export default function Dashboard() {
   }, []);
 
   // ── 5DOF Arm
-  const [joints, setJoints] = useState<ArmAngles>(DEFAULT_JOINTS);
+  const [joints, setJoints] = useState<ArmAngles>(() => {
+    try {
+      const saved = localStorage.getItem("ares_arm_joints");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return { ...DEFAULT_JOINTS, ...parsed }; // Merge in case of schema changes
+      }
+    } catch (e) {
+      console.warn("Failed to load joints from localStorage", e);
+    }
+    return DEFAULT_JOINTS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ares_arm_joints", JSON.stringify(joints));
+    } catch (e) {
+      console.warn("Failed to save joints to localStorage", e);
+    }
+  }, [joints]);
+
   const resetAnimRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   const lastCommandTimeRef = useRef<number>(0);
