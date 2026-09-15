@@ -770,7 +770,6 @@ interface ArmControlsProps {
   stepSize: number;
   setStepSize: React.Dispatch<React.SetStateAction<number>>;
   applyPreset: (p: typeof ARM_PRESETS[0]) => void;
-  handleResetArm: () => void;
   editingJoint: keyof ArmAngles | null;
   setEditingJoint: React.Dispatch<React.SetStateAction<keyof ArmAngles | null>>;
   editValue: string;
@@ -787,7 +786,6 @@ const ArmControls = React.memo(function ArmControls({
   stepSize,
   setStepSize,
   applyPreset,
-  handleResetArm,
   editingJoint,
   setEditingJoint,
   editValue,
@@ -1038,28 +1036,6 @@ const ArmControls = React.memo(function ArmControls({
           })}
         </div>
       </div>
-      <button
-        className="arm-reset-bottom group relative overflow-hidden w-full mt-1.5 text-[11px] gap-2 h-7 rounded-full border border-slate-200 dark:border-slate-700/60 bg-white hover:bg-slate-50 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-all duration-300 flex items-center justify-center cursor-pointer shadow-sm hover:shadow-md active:scale-[0.96] active:ring-2 active:ring-slate-200 dark:active:ring-slate-600 font-bold tracking-wide"
-        onClick={handleResetArm}
-        data-testid="btn-arm-reset-bottom"
-      >
-        <span className="absolute inset-0 w-[200%] h-full bg-gradient-to-r from-transparent via-slate-300/30 dark:via-white/5 to-transparent -translate-x-[150%] group-hover:translate-x-[50%] transition-transform duration-1000 ease-in-out"></span>
-        <RotateCcw className="w-3.5 h-3.5 group-hover:-rotate-180 transition-transform duration-700 ease-in-out relative z-10 text-cyan-600 dark:text-cyan-400" />
-        
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-70 group-hover:opacity-100 transition-opacity relative z-10 text-cyan-600 dark:text-cyan-400">
-          <path d="M7 22h10" />
-          <path d="M12 22v-4" />
-          <circle cx="12" cy="18" r="2" />
-          <path d="M12 16v-6" />
-          <circle cx="12" cy="10" r="2" />
-          <path d="M13.5 8.5l4-4" />
-          <circle cx="18.5" cy="3.5" r="1.5" />
-          <path d="M19 2l2 -1" />
-          <path d="M17 3l-1 -2" />
-        </svg>
-
-        <span className="relative z-10">Reset Arm to Home</span>
-      </button>
     </div>
   );
 });
@@ -1931,14 +1907,7 @@ export default function Dashboard() {
     }, 16);
   }, [joints]);
 
-  const handleResetArm = useCallback(() => {
-    // Update UI slider states to Home
-    animateJointsTo(DEFAULT_JOINTS, "Home (reset)");
-    if (commandUrl) {
-      // Send HOME macro for ESP32 to run the mechanical homing sequence
-      sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-    }
-  }, [animateJointsTo, commandUrl]);
+
 
   const handleExecuteSequence = useCallback(async (seq: {joint: keyof ArmAngles, angle: number}[]) => {
     let currentAngles = { ...joints };
@@ -2952,7 +2921,6 @@ export default function Dashboard() {
                         stepSize={stepSize}
                         setStepSize={setStepSize}
                         applyPreset={applyPreset}
-                        handleResetArm={handleResetArm}
                         editingJoint={editingJoint}
                         setEditingJoint={setEditingJoint}
                         editValue={editValue}
