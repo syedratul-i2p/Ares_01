@@ -8,9 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { readTextFile } from "@tauri-apps/plugin-fs";
 
 // Polyfill types for WebSerial
 declare global {
@@ -33,17 +30,8 @@ export default function EspStudio() {
   
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
-  const isTauriEnv = () => typeof window !== "undefined" && Boolean((window as any).__TAURI_INTERNALS__);
-
   const fetchFirmware = async () => {
     try {
-      if (isTauriEnv()) {
-        const code = await invoke<string>("read_firmware");
-        setFirmwareCode(code);
-        toast.success("Code Viewer Synced via Rust Backend!");
-        return;
-      }
-      
       // Browser mode: fetch full original C++ firmware source from public asset
       const res = await fetch("/firmware_main.cpp");
       if (res.ok) {
@@ -60,23 +48,6 @@ export default function EspStudio() {
 
   useEffect(() => {
     fetchFirmware();
-    
-    let unlistenFn: (() => void) | undefined;
-    if (isTauriEnv()) {
-      listen<string>("build-log", (event) => {
-        setLogs((prev) => {
-          const newLogs = [...prev, event.payload];
-          if (newLogs.length > 1000) return newLogs.slice(newLogs.length - 1000);
-          return newLogs;
-        });
-      }).then((fn) => {
-        unlistenFn = fn;
-      }).catch(err => console.warn("Tauri build-log listener error:", err));
-    }
-
-    return () => {
-      if (unlistenFn) unlistenFn();
-    };
   }, []);
 
   const scrollToBottom = () => {
@@ -260,35 +231,15 @@ export default function EspStudio() {
       setConnected(false);
     }
     
-    // Pipeline Step 3: Flash Firmware via Embedded esptool Sidecar
-    if (!isTauriEnv()) {
-      setIsFlashing(false);
-      toast.dismiss();
-      toast.info("WiFi credentials injected! Direct binary flashing runs via the Desktop App.");
-      setLogs(prev => [
-        ...prev, 
-        "[SYSTEM] NVS WiFi credentials successfully configured via WebSerial!",
-        "[INFO] To compile & flash complete binary firmware images, run the ARES-01 Desktop application."
-      ]);
-      return;
-    }
-
-    setIsFlashing(true);
-    toast.loading("Flashing ESP32 via embedded esptool...");
-    setLogs(prev => [...prev, "[SYSTEM] Initiating Embedded USB Flasher..."]);
-    
-    try {
-      const result = await invoke<string>("flash_firmware", { ssid: "", pass: "" });
-      toast.dismiss();
-      toast.success(result || "ESP32 Flashed Successfully!");
-      setLogs(prev => [...prev, "[SYSTEM] Flash successful! Rover will now reboot."]);
-    } catch (e: any) {
-      toast.dismiss();
-      toast.error("Flashing failed! Check logs.");
-      setLogs(prev => [...prev, "FLASH ERROR:", String(e)]);
-    } finally {
-      setIsFlashing(false);
-    }
+    // Pipeline Step 3: Flash Firmware (Web environment boundary)
+    setIsFlashing(false);
+    toast.dismiss();
+    toast.info("WiFi credentials injected!");
+    setLogs(prev => [
+      ...prev, 
+      "[SYSTEM] NVS WiFi credentials successfully configured via WebSerial!",
+      "[INFO] Full binary flashing requires the native esptool CLI. Use 'flash_esp32.ps1' locally."
+    ]);
   };
 
   return (

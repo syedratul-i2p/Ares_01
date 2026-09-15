@@ -12,10 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTheme } from "@/components/theme-provider";
 import { motion, AnimatePresence } from "framer-motion";
-import { listen } from "@tauri-apps/api/event";
-import { readTextFile } from "@tauri-apps/plugin-fs";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { invoke } from "@tauri-apps/api/core";
+
 import { CameraOverlay } from "@/components/CameraOverlay";
 import { toast } from "sonner";
 import { useInterval } from "@/hooks/use-interval";
@@ -1410,18 +1407,7 @@ export default function Dashboard() {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `ARES01_SNAP_${timestamp}.jpg`;
       
-      try {
-        if ((window as any).__TAURI_INTERNALS__) {
-          await invoke('save_screenshot_command', { 
-            rawData: base64Data,
-            filename: filename
-          });
-          toast.success(`📸 Saved to Pictures/ARES-01`);
-          return;
-        }
-      } catch (err) {
-        console.warn(`${LOG} Tauri native save failed, falling back to browser download`, err);
-      }
+
       
       const link = document.createElement('a');
       link.href = base64Data;
@@ -1484,13 +1470,17 @@ export default function Dashboard() {
       
       try {
         const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-        const arrayBuffer = await blob.arrayBuffer();
-        const videoBytes = Array.from(new Uint8Array(arrayBuffer));
-        
-        console.log(`${LOG} Requesting video save via Tauri IPC...`);
-        const savedPath = await invoke<string>("save_video_command", { videoBytes });
-        console.log(`${LOG} Video successfully saved to: ${savedPath}`);
-        toast.success(`🎥 Video Saved: ${savedPath}`);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        document.body.appendChild(a);
+        a.style.display = "none";
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        a.download = `ARES01_REC_${timestamp}.webm`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        toast.success(`🎥 Video Saved to Downloads`);
       } catch (err) {
         console.error(`${LOG} Failed to save video:`, err);
         toast.error(`⚠️ Video Save Failed: ${err}`);

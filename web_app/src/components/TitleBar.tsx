@@ -1,30 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { X, Minus, Square } from "lucide-react";
 
 export function TitleBar() {
-  const handleMinimize = async () => {
-    try {
-      await getCurrentWindow().minimize();
-    } catch (e) {
-      console.warn("Tauri minimize failed:", e);
-    }
+  const handleMinimize = () => {
+    console.log("Web mode: Minimize window action disabled.");
   };
 
-  const handleMaximize = async () => {
-    try {
-      await getCurrentWindow().toggleMaximize();
-    } catch (e) {
-      console.warn("Tauri maximize failed:", e);
-    }
+  const handleMaximize = () => {
+    console.log("Web mode: Maximize window action disabled.");
   };
 
-  const handleClose = async () => {
-    try {
-      await getCurrentWindow().close();
-    } catch (e) {
-      console.warn("Tauri close failed:", e);
-    }
+  const handleClose = () => {
+    console.log("Web mode: Close window action disabled.");
   };
 
   return (
