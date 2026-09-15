@@ -958,12 +958,6 @@ const ArmControls = React.memo(function ArmControls({
     <div className="arm-controls-wrapper flex flex-col gap-1 py-0">
       <div className="flex items-center justify-between">
         <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">5DOF Arm Control</div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"
-            onClick={handleResetArm} data-testid="btn-arm-reset">
-            <RotateCcw className="w-3 h-3" />
-          </Button>
-        </div>
       </div>
 
       {/* Preset buttons removed — use Reset Arm to Home button or voice commands */}
