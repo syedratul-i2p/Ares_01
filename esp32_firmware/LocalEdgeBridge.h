@@ -12,7 +12,7 @@ public:
     LocalEdgeBridge(HardwareController* hw);
     
     // Attempt STA, fallback to AP
-    bool begin(const char* staSsid, const char* staPassword, const char* apSsid = "ARES_01_OFFLINE", const char* apPassword = "");
+    bool begin(const char* staSsid, const char* staPassword, const char* apSsid = "ARES_01", const char* apPassword = "");
     
     void loop();
 

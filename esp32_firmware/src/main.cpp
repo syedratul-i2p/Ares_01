@@ -54,7 +54,7 @@ static const char *TAG_HTTP = "HTTP";
 #define PCLK_GPIO_NUM 13
 
 // NETWORK CONFIGURATION
-const char *ap_ssid = "ARES_01_OFFLINE";
+const char *ap_ssid = "ARES_01";
 const char *ap_password = "Admin123";
 
 WebServer server(80);

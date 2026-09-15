@@ -9,7 +9,7 @@ This repository contains the monolithic, highly optimized C++ firmware for the *
 ## 🚀 Key Features
 
 *   **Optimized Camera Streaming:** High-performance MJPEG streaming with native DMA bus and PSRAM optimization for the OV3660 sensor (running at 20MHz XCLK).
-*   **Dual-Mode Wi-Fi (AP + STA):** Automatically manages connectivity. Acts as a local Access Point (`ARES_01_OFFLINE`) for offline control and dynamically connects to a Station network for cloud operations. Contains logic to prevent AP broadcasting drops when STA is unreachable.
+*   **Dual-Mode Wi-Fi (AP + STA):** Automatically manages connectivity. Acts as a local Access Point (`ARES_01`) for offline control and dynamically connects to a Station network for cloud operations. Contains logic to prevent AP broadcasting drops when STA is unreachable.
 *   **Native ESP Logging:** Implements structured, color-coded logging using the native `esp_log.h` subsystem for clear diagnostics (`SYS`, `WIFI`, `CAM`, `HTTP`) without terminal flooding or IDE freezing.
 *   **JSON Command API:** Lightweight, robust HTTP POST endpoint (`/command`) parsing structural JSON payloads via `ArduinoJson` to control hardware (drive, stop, speed adjustments).
 
