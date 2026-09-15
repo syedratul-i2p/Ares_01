@@ -1942,12 +1942,43 @@ export default function Dashboard() {
   }, [animateJointsTo, commandUrl]);
 
   const handleExecuteSequence = useCallback(async (seq: {joint: keyof ArmAngles, angle: number}[]) => {
+    let currentAngles = { ...joints };
     for (const step of seq) {
-      setJointAngle(step.joint, step.angle);
-      // Wait for movement to "complete" before next step.
-      await new Promise(resolve => setTimeout(resolve, 800));
+      const diff = step.angle - currentAngles[step.joint];
+      if (diff === 0) continue;
+      
+      const dir = diff > 0 ? "UP" : "DOWN";
+      
+      // 1. Send hardware START command
+      sendArmCommand("start", step.joint, dir);
+      
+      // 2. Animate the UI smoothly over the calculated duration
+      const durationMs = Math.abs(diff) * 20; // 20ms per degree -> 90 degrees = 1.8 seconds.
+      const frames = Math.floor(durationMs / 16);
+      const startAngle = currentAngles[step.joint];
+      
+      for (let i = 1; i <= frames; i++) {
+        const t = i / frames;
+        const currentAnimAngle = Math.round(startAngle + diff * t);
+        setJoints(prev => ({ ...prev, [step.joint]: currentAnimAngle }));
+        await new Promise(r => setTimeout(r, 16));
+      }
+      
+      // 3. Send STOP command to ESP32
+      sendArmCommand("stop", step.joint);
+      
+      // Update local tracker and snap UI to exact target
+      currentAngles[step.joint] = step.angle;
+      setJoints(prev => {
+        const next = { ...prev, [step.joint]: step.angle };
+        // If there's any other state synced, it updates here. The original used setJointAngle which might call other things.
+        return next;
+      });
+      
+      // Pause between joints
+      await new Promise(r => setTimeout(r, 400));
     }
-  }, [setJointAngle]);
+  }, [joints, sendArmCommand]);
 
   const applyPreset = useCallback((p: typeof ARM_PRESETS[0]) => {
     animateJointsTo(p.joints, `Preset: ${p.name}`);
