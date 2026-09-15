@@ -584,6 +584,7 @@ const CameraView = React.memo(function CameraView({
       {roverOnline && streamSrc ? (
         <img 
           id="rover-video-stream"
+          crossOrigin="anonymous"
           key={streamKey}
           src={isStreamSevered || isRebooting ? "" : `${streamSrc}&t=${streamKey}`} 
           alt="ARES-01 live feed"
@@ -1397,6 +1398,31 @@ export default function Dashboard() {
   const recordedChunksRef = useRef<Blob[]>([]);
   const reqFrameRef = useRef<number>(0);
 
+  const aresDirHandleRef = useRef<any>(null);
+
+  const saveToAresFolder = async (blob: Blob, filename: string) => {
+    try {
+      if (!window.showDirectoryPicker) {
+        throw new Error("File System Access API not supported");
+      }
+      if (!aresDirHandleRef.current) {
+        toast.info("Please select a folder (like Downloads) to create the 'ARES01' folder in.", { duration: 5000 });
+        const rootDir = await window.showDirectoryPicker({ mode: "readwrite" });
+        aresDirHandleRef.current = await rootDir.getDirectoryHandle("ARES01", { create: true });
+      }
+      
+      const fileHandle = await aresDirHandleRef.current.getFileHandle(filename, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      toast.success(`📸 Saved to ARES01/${filename}`);
+      return true;
+    } catch (e: any) {
+      console.warn("Folder save failed or cancelled, falling back to standard download.", e);
+      return false;
+    }
+  };
+
   const handleCapturePhoto = useCallback(async () => {
     try {
       const base64Data = await extractCurrentFrameBase64();
@@ -1407,15 +1433,21 @@ export default function Dashboard() {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `ARES01_SNAP_${timestamp}.jpg`;
       
+      // Convert base64 to blob for the File System Access API
+      const fetchRes = await fetch(base64Data);
+      const blob = await fetchRes.blob();
 
+      const savedToFolder = await saveToAresFolder(blob, filename);
       
-      const link = document.createElement('a');
-      link.href = base64Data;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      toast.success(`📸 Saved to Downloads`);
+      if (!savedToFolder) {
+        const link = document.createElement('a');
+        link.href = base64Data;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success(`📸 Saved ${filename} to Downloads`);
+      }
     } catch (err) {
       console.error(`${LOG} Failed to capture photo:`, err);
       toast.error(`⚠️ Capture Failed: ${err instanceof Error ? err.message : err}`);
@@ -1470,17 +1502,23 @@ export default function Dashboard() {
       
       try {
         const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        document.body.appendChild(a);
-        a.style.display = "none";
-        a.href = url;
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        a.download = `ARES01_REC_${timestamp}.webm`;
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        toast.success(`🎥 Video Saved to Downloads`);
+        const filename = `ARES01_REC_${timestamp}.webm`;
+        
+        const savedToFolder = await saveToAresFolder(blob, filename);
+
+        if (!savedToFolder) {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          document.body.appendChild(a);
+          a.style.display = "none";
+          a.href = url;
+          a.download = filename;
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+          toast.success(`🎥 Saved ${filename} to Downloads`);
+        }
       } catch (err) {
         console.error(`${LOG} Failed to save video:`, err);
         toast.error(`⚠️ Video Save Failed: ${err}`);
@@ -2162,170 +2200,138 @@ export default function Dashboard() {
   // ── Local Keyword Fallback (used when Gemini is unavailable) ─────────────
   const executeLocalKeywordFallback = useCallback(async (text: string, timestamp: string, appendLog: (msg: string) => void) => {
     const lowerText = text.toLowerCase();
+    
+    // Add spaces around the text for easier word boundary matching using regex or indexOf
+    const paddedText = ` ${lowerText} `;
 
-    // 1. Check for time-based parameter (e.g. "৫ সেকেন্ড", "5s", "3 sec")
+    // 1. Time-based parameter (e.g. "৫ সেকেন্ড", "5s", "3 sec")
     const numMatch = lowerText.match(/(\d+(?:\.\d+)?)\s*(?:সেকেন্ড|sec|s)/);
     const durationSec = numMatch ? parseFloat(numMatch[1]) : 0;
 
-    // Keywords
-    const hasDriveKeyword = ['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight', 'ফরওয়ার্ড'].some(k => lowerText.includes(k));
-    const hasReverseKeyword = ['পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao', 'ব্যাক', 'রিভার্স'].some(k => lowerText.includes(k));
-    const hasPickKeyword = ['pick', 'grab', 'pikap', 'collect', 'পিকআপ', 'পিক'].some(k => lowerText.includes(k));
-    const hasDropKeyword = ['drop', 'ড্রপ'].some(k => lowerText.includes(k));
-    const hasScanKeyword = ['চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo', 'স্ক্যান', 'সার্চ'].some(k => lowerText.includes(k));
-    
-    // Explicit entity keywords
-    const explicitRover = ['রোভার', 'রোবার', 'rover', 'গাড়ি', 'gari', 'car', 'গাড়ী'].some(k => lowerText.includes(k));
+    // Helper to check arrays against paddedText to prevent substring mismatch where possible
+    // but standard includes() is also fine for root words. We use simple includes for broad matching.
+    const check = (words: string[]) => words.some(w => lowerText.includes(w));
+    const checkStrict = (words: string[]) => words.some(w => paddedText.includes(` ${w} `) || lowerText.includes(w));
 
-    // Color keyword detection
+    // KEYWORDS: DRIVING
+    const hasDriveKeyword = check(['সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight', 'ফরওয়ার্ড', 'সামনের', 'এগোও', 'সামন']);
+    const hasReverseKeyword = check(['পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao', 'ব্যাক', 'রিভার্স', 'পিছন', 'পেছন']);
+    const hasLeft = check(['বামে', 'বাম', 'left', 'বাঁয়ে', 'বাঁয়ে', 'bamdike', 'baame', 'বামদিকে', 'লেফট']);
+    const hasRight = check(['ডানে', 'ডান', 'right', 'daine', 'dan', 'ডানদিকে', 'dane', 'daane', 'রাইট']);
+    const hasStop = check(['থামো', 'দাঁড়াও', 'দাড়াও', 'থাম', 'দারান', 'দাঁড়ান', 'stop', 'halt', 'break', 'thamo', 'dara', 'thak', 'ব্রেক', 'স্টপ']);
+    
+    // EXPLICIT ROVER/CAR KEYWORD
+    const explicitRover = check(['রোভার', 'রোবার', 'rover', 'গাড়ি', 'gari', 'car', 'গাড়ী', 'গাড়ির', 'রোভারের', 'রোভারটা', 'গাড়িটা']);
+
+    // KEYWORDS: ARM JOINTS (Very aggressive variations to catch STT inaccuracies)
+    const hasGripper = check(['গ্রিপার', 'gripper', 'grip', 'griper', 'greeper', 'গ্রিপ্পার', 'গ্রিপের', 'ধরন', 'চিমটা', 'claw', 'jaw', 'ক্ল', 'গ্রিপ', 'হাত', 'haat', 'আঙ্গুল', 'angul', 'চিমটি', 'chimti', 'কামড়', 'kamor', 'মুঠো', 'mutho', 'গ্রিপারটা', 'gripperta', 'গ্রিপারটি']);
+    const hasShoulder = check(['শোল্ডার', 'shoulder', 'কাঁধ', 'kandh', 'কাধ', 'সোল্ডার', 'শোল্ডারটা', 'সোল্ডারটা']);
+    const hasElbow = check(['এলবো', 'elbow', 'কনুই', 'konui', 'কনু', 'এলব', 'এলবোটা']);
+    const hasWrist = check(['রিস্ট', 'wrist', 'কবজি', 'kobji', 'risk', 'rist', 'rest', 'রিষ্ট', 'রিস্', 'কব্জি', 'রিস্টটা', 'কব্জিটা']);
+    const hasBaseJoint = check(['বেস', 'base', 'bass', 'bays', 'pace', 'বেইস', 'বেজ', 'বেশ', 'baze', 'bej', 'bez', 'vesh', 'bes', 'besh', 'বেস্ট', 'best', 'ব্যাস', 'byas', 'ফেস', 'face', 'দেশ', 'desh', 'গেস', 'guess', 'ব্রেস', 'brace', 'পেস', 'pesh', 'pes', 'bace', 'vas', 'vash', 'ভেজ', 'vej', 'বেছ', 'bech', 'bese', 'veze', 'besei', 'বেসেই', 'বেইজ', 'বেসটা', 'বেইজটা', 'বেজটা', 'গোড়া', 'বেসটি']);
+
+    // KEYWORDS: ARM ACTIONS
+    const hasUp = check(['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা', 'উঠা', 'তুলো', 'আপ', 'উড়াও', 'উডাও', 'ওঠো', 'udao', 'urao', 'উঁচুতে']);
+    const hasDown = check(['নিচে', 'niche', 'down', 'নামাও', 'নেও', 'namao', 'lower', 'নামা', 'ডাউন', 'নিচের']);
+    const hasOpen = check(['খোলো', 'খুলো', 'open', 'kholo', 'khulo', 'ওপেন', 'release', 'খোলা', 'khola', 'ছাড়ো', 'charo', 'ছাড়', 'ছেড়ে']);
+    const hasClose = check(['বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'atkao', 'shut', 'clamp', 'bondo', 'ধরো', 'dhoro', 'কামড়', 'মুঠো', 'ধরে']);
+
+    // MACROS / MISSIONS
+    const hasPickKeyword = check(['pick', 'grab', 'pikap', 'collect', 'পিকআপ', 'পিক']);
+    const hasDropKeyword = check(['drop', 'ড্রপ']);
+    const hasScanKeyword = check(['চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo', 'স্ক্যান', 'সার্চ']);
+    const hasDanceKeyword = check(['নাচ', 'ডান্স', 'dance', 'celebrate', 'nacho', 'anondo']);
+    const hasHomeKeyword = check(['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal', 'স্বাভাবিক']);
+
+    // Color and Object Detection
     const colorMap: Record<string, string> = {
-      'লাল': 'RED', 'red': 'RED',
-      'নীল': 'BLUE', 'blue': 'BLUE',
-      'সবুজ': 'GREEN', 'green': 'GREEN',
-      'হলুদ': 'YELLOW', 'yellow': 'YELLOW',
-      'কালো': 'BLACK', 'black': 'BLACK',
-      'সাদা': 'WHITE', 'white': 'WHITE', 'shada': 'WHITE', 'sada': 'WHITE',
-      'হোয়াইট': 'WHITE', 'গ্রিন': 'GREEN', 'ব্লু': 'BLUE', 'ইয়েলো': 'YELLOW',
-      'ব্ল্যাক': 'BLACK', 'রেড': 'RED',
+      'লাল': 'RED', 'red': 'RED', 'নীল': 'BLUE', 'blue': 'BLUE', 'সবুজ': 'GREEN', 'green': 'GREEN',
+      'হলুদ': 'YELLOW', 'yellow': 'YELLOW', 'কালো': 'BLACK', 'black': 'BLACK',
+      'সাদা': 'WHITE', 'white': 'WHITE', 'shada': 'WHITE', 'sada': 'WHITE', 'হোয়াইট': 'WHITE'
     };
     const detectedColorEntry = Object.entries(colorMap).find(([k]) => lowerText.includes(k));
-    if (detectedColorEntry) {
-      appendLog(`[${timestamp}] [VISION] Target color identified: ${detectedColorEntry[1]}`);
-    }
-
-    // If color + object word detected but no explicit pick keyword, treat as pick
-    const hasObjectWord = ['বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu', 'অবজেক্ট'].some(k => lowerText.includes(k));
+    if (detectedColorEntry) appendLog(`[${timestamp}] [VISION] Target color identified: ${detectedColorEntry[1]}`);
+    
+    const hasObjectWord = check(['বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu', 'অবজেক্ট', 'কিছু']);
     const hasColorAndObject = detectedColorEntry && hasObjectWord;
 
-    // A. Sequential Macro: Reverse and Drop
-    if (hasReverseKeyword && hasDropKeyword) {
+    // MISSIONS / MACROS EXECUTION
+    if (hasReverseKeyword && hasDropKeyword && !explicitRover) {
       const driveDuration = durationSec > 0 ? durationSec * 1000 : 2000;
       appendLog(`[${timestamp}] [MISSION] Phase 1: Reversing to target zone (${driveDuration / 1000}s)...`);
       setDriveDirection("BACKWARD");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "BACKWARD", speed: 255 }).catch(console.error);
-      
       await new Promise(r => setTimeout(r, driveDuration));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 2: Target reached. Braking rover.`);
       setDriveDirection("STOP");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(console.error);
-      
       await new Promise(r => setTimeout(r, 400));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 3: Executing autonomous drop macro...`);
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Executing autonomous drop...`);
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(console.error);
-      
       setJoints(prev => ({ ...prev, shoulder: 45, elbow: 120, gripper: 180 }));
       await new Promise(r => setTimeout(r, 4000));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Mission Completed. Arm homed.`);
       setJoints(DEFAULT_JOINTS);
-      
-      toast.success("Autonomous Drop Mission Completed!");
+      toast.success("Autonomous Drop Completed!");
       return;
     }
 
-    // B. Sequential Macro: Forward and Pick
-    if (hasDriveKeyword && (hasPickKeyword || hasColorAndObject)) {
+    if (hasDriveKeyword && (hasPickKeyword || hasColorAndObject) && !explicitRover) {
       const driveDuration = durationSec > 0 ? durationSec * 1000 : 2000;
       appendLog(`[${timestamp}] [MISSION] Phase 1: Driving forward to target (${driveDuration / 1000}s)...`);
       setDriveDirection("FORWARD");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "FORWARD", speed: 255 }).catch(console.error);
-      
       await new Promise(r => setTimeout(r, driveDuration));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 2: Target reached. Braking rover.`);
       setDriveDirection("STOP");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(console.error);
-      
       await new Promise(r => setTimeout(r, 400));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 3: Executing autonomous pickup macro...`);
-      // Trigger the ESP32 internal macro
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Executing autonomous pickup...`);
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(console.error);
-      
-      // The ESP32 macro takes about 6 seconds to complete. 
-      // Update UI to show picking down
       setJoints({ base: 90, shoulder: 45, elbow: 120, wrist: 90, gripper: 180 });
       await new Promise(r => setTimeout(r, 6500));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Mission Completed. Arm homed with payload.`);
-      // Sync UI to final state (Home with closed gripper)
       setJoints({ ...DEFAULT_JOINTS, gripper: 0 });
-      
-      toast.success("Autonomous Pick Mission Completed!");
+      toast.success("Autonomous Pick Completed!");
       return;
     }
 
-    const hasDanceKeyword = ['নাচ', 'ডান্স', 'dance', 'celebrate', 'nacho', 'anondo'].some(k => lowerText.includes(k));
-
-    // C. Autonomous Scan Sequence
-    if (hasScanKeyword) {
-      appendLog(`[${timestamp}] [MISSION] Initiating Area Scan Sequence...`);
+    if (hasScanKeyword && !explicitRover) {
+      appendLog(`[${timestamp}] [MISSION] Area Scan Sequence...`);
       setDriveDirection("LEFT");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "LEFT", speed: 200 }).catch(console.error);
-      
       await new Promise(r => setTimeout(r, 1500));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Scanning right sector...`);
       setDriveDirection("RIGHT");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "RIGHT", speed: 200 }).catch(console.error);
-      
       await new Promise(r => setTimeout(r, 3000));
-      
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Scan complete. Holding position.`);
       setDriveDirection("STOP");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 200 }).catch(console.error);
-      
       toast.success("Scan Completed");
       return;
     }
 
-    // C2. Dance / Celebrate Sequence
     if (hasDanceKeyword) {
-      appendLog(`[${timestamp}] [MISSION] Initiating Celebration Routine...`);
-      
+      appendLog(`[${timestamp}] [MISSION] Celebration Routine...`);
       setDriveDirection("LEFT");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "LEFT", speed: 255 }).catch(console.error);
-      setJoints({ base: 90, shoulder: 45, elbow: 180, wrist: 90, gripper: 180 }); // Arm up
+      setJoints({ base: 90, shoulder: 45, elbow: 180, wrist: 90, gripper: 180 });
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(console.error);
       await new Promise(r => setTimeout(r, 800));
-
       setDriveDirection("RIGHT");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "RIGHT", speed: 255 }).catch(console.error);
-      setJoints(prev => ({ ...prev, gripper: 90 })); // Snap gripper
+      setJoints(prev => ({ ...prev, gripper: 90 }));
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "DROP", speed: 255 }).catch(console.error);
       await new Promise(r => setTimeout(r, 1600));
-
-      setDriveDirection("LEFT");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "LEFT", speed: 255 }).catch(console.error);
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "PICKUP", speed: 255 }).catch(console.error);
-      await new Promise(r => setTimeout(r, 800));
-
       setDriveDirection("STOP");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(console.error);
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
-      
-      toast.success("Celebration Complete!");
       return;
     }
 
-    // D. Timed Movement
-    if (durationSec > 0) {
+    // TIMED MOVEMENT
+    if (durationSec > 0 && !hasAnyJoint) {
       let dir: DriveDirection = "FORWARD";
-      let dirLabel = "FORWARD";
-      if (hasReverseKeyword) {
-        dir = "BACKWARD";
-        dirLabel = "BACKWARD";
-      } else if (['বামে', 'বাম', 'left', 'বাঁয়ে', 'বাঁয়ে', 'bame', 'bam'].some(k => lowerText.includes(k))) {
-        dir = "LEFT";
-        dirLabel = "LEFT";
-      } else if (['ডানে', 'ডান', 'right', 'ডানদিকে', 'daine', 'dan'].some(k => lowerText.includes(k))) {
-        dir = "RIGHT";
-        dirLabel = "RIGHT";
-      }
+      if (hasReverseKeyword) dir = "BACKWARD";
+      else if (hasLeft) dir = "LEFT";
+      else if (hasRight) dir = "RIGHT";
 
-      appendLog(`[${timestamp}] [NAV] Moving ${dirLabel} for ${durationSec} seconds...`);
+      appendLog(`[${timestamp}] [NAV] Moving ${dir} for ${durationSec}s...`);
       setDriveDirection(dir);
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: dir, speed: 255 }).catch(console.error);
 
@@ -2337,22 +2343,11 @@ export default function Dashboard() {
       return;
     }
 
-    // E. Individual Arm Joint Commands — CHECK FIRST before drive to avoid conflicts
-    const hasGripper = ['গ্রিপার', 'gripper', 'grip', 'griper', 'greeper', 'গ্রিপ্পার', 'গ্রিপের', 'ধরন', 'চিমটা', 'claw', 'jaw', 'ক্ল', 'গ্রিপ', 'হাত', 'haat', 'আঙ্গুল', 'angul', 'ধরো', 'dhoro', 'ছাড়ো', 'charo', 'চিমটি', 'chimti', 'কামড়', 'kamor', 'মুঠো', 'mutho', 'গ্রিপারটা', 'gripperta'].some(k => lowerText.includes(k));
-    const hasShoulder = ['শোল্ডার', 'shoulder', 'কাঁধ', 'kandh', 'কাধ', 'সোল্ডার'].some(k => lowerText.includes(k));
-    const hasElbow = ['এলবো', 'elbow', 'কনুই', 'konui', 'কনু', 'এলব'].some(k => lowerText.includes(k));
-    const hasWrist = ['রিস্ট', 'wrist', 'কবজি', 'kobji', 'risk', 'rist', 'rest', 'রিষ্ট', 'রিস্', 'কব্জি'].some(k => lowerText.includes(k));
-    // Aggressive Bengali base detection to combat STT boundary issues
-    const hasBaseJoint = ['বেস', 'base', 'bass', 'bays', 'pace', 'বেইস', 'বেজ', 'বেশ', 'baze', 'bej', 'bez', 'vesh', 'bes', 'besh', 'বেস্ট', 'best', 'ব্যাস', 'byas', 'ফেস', 'face', 'দেশ', 'desh', 'গেস', 'guess', 'ব্রেস', 'brace', 'পেস', 'pesh', 'pes', 'bace', 'vas', 'vash', 'ভেজ', 'vej', 'বেছ', 'bech', 'bese', 'veze', 'besei', 'বেসেই'].some(k => lowerText.includes(k));
+    // STRICT SEPARATION: If "Rover" is mentioned, FORCE driving (ignore accidental STT joints).
+    // If an Arm Joint is mentioned and "Rover" is NOT mentioned, FORCE arm joint.
+    const hasAnyJoint = hasGripper || hasShoulder || hasElbow || hasWrist || hasBaseJoint;
+    const isArmCommand = hasAnyJoint && !explicitRover;
 
-    const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা', 'উঠা', 'তুলো', 'আপ', 'উড়াও', 'উডাও', 'ওঠো', 'udao', 'urao'].some(k => lowerText.includes(k)) || lowerText.split(/\s+/).includes('ও');
-    const hasDown = ['নিচে', 'niche', 'down', 'নামাও', 'নেও', 'namao', 'lower', 'নামা', 'ডাউন'].some(k => lowerText.includes(k));
-    const hasOpen = ['খোলো', 'খুলো', 'open', 'kholo', 'khulo', 'ওপেন', 'release', 'খোলা', 'khola', 'ছাড়ো', 'charo'].some(k => lowerText.includes(k));
-    const hasClose = ['বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'atkao', 'shut', 'clamp', 'bondo', 'ধরো', 'dhoro', 'কামড়', 'মুঠো'].some(k => lowerText.includes(k));
-    const hasLeft = ['বামে', 'বাম', 'left', 'bame', 'বাঁয়ে', 'বাঁয়ে', 'bamdike', 'baame'].some(k => lowerText.includes(k));
-    const hasRight = ['ডানে', 'ডান', 'right', 'daine', 'dan', 'ডানদিকে', 'dane', 'daane'].some(k => lowerText.includes(k));
-
-    // Auto-stop duration for DC motors (ms)
     const JOINT_RUN_MS = 1500;
     const sendJointWithAutoStop = (joint: string, angle: number) => {
       if (commandUrl) {
@@ -2363,11 +2358,7 @@ export default function Dashboard() {
       }
     };
 
-    const hasAnyJoint = hasGripper || hasShoulder || hasElbow || hasWrist || hasBaseJoint;
-
-    // RULE: If user EXPLICITLY mentions "rover" or "gari", we bypass the Arm Joint execution block!
-    // This allows "rover bame ghurao" to correctly fall to the driving block, even if STT hallucinates a joint word.
-    if (hasAnyJoint && !explicitRover) {
+    if (isArmCommand) {
       if (hasGripper) {
         if (hasOpen) {
           appendLog(`[${timestamp}] [ARM] Gripper: OPENING.`);
@@ -2378,9 +2369,9 @@ export default function Dashboard() {
           setJoints(prev => ({ ...prev, gripper: 180 }));
           sendJointWithAutoStop("gripper", 180);
         } else {
-          appendLog(`[${timestamp}] [ARM] Gripper: OPENING (default).`);
-          setJoints(prev => ({ ...prev, gripper: 0 }));
-          sendJointWithAutoStop("gripper", 0);
+          appendLog(`[${timestamp}] [ARM] Gripper: TOGGLE.`);
+          setJoints(prev => ({ ...prev, gripper: prev.gripper === 0 ? 180 : 0 }));
+          sendJointWithAutoStop("gripper", hasLeft || hasUp ? 180 : 0);
         }
       } else if (hasShoulder) {
         const angle = hasUp ? 180 : hasDown ? 0 : 90;
@@ -2398,46 +2389,43 @@ export default function Dashboard() {
         setJoints(prev => ({ ...prev, wrist: angle }));
         sendJointWithAutoStop("wrist", angle);
       } else if (hasBaseJoint) {
+        // Only parse Right/Left for Base. If neither, default to 90 (Stop).
         const angle = hasLeft ? 0 : hasRight ? 180 : 90;
         appendLog(`[${timestamp}] [ARM] Base: ${hasLeft ? 'LEFT' : hasRight ? 'RIGHT' : 'STOP'}.`);
         setJoints(prev => ({ ...prev, base: angle }));
         sendJointWithAutoStop("base", angle);
       }
-    } else if (['হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal'].some(k => lowerText.includes(k))) {
-      // G. Home/Reset — only if no joint name was specified
-      appendLog(`[${timestamp}] [ARM] Manipulator system homing sequence initiated.`);
+    } else if (hasHomeKeyword && !isArmCommand) {
+      appendLog(`[${timestamp}] [ARM] Homing Sequence...`);
       const homeState = { base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 };
       setJoints(homeState);
-      if (commandUrl) {
-        sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-      }
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(console.error);
     } else {
-      // H. Standard Continuous Driving (Only if no Arm/Home commands matched)
+      // DRIVE COMMANDS (Only executes if no Arm Joint matched OR explicitRover is TRUE)
       if (hasDriveKeyword) {
-        appendLog(`[${timestamp}] [NAV] Propulsion system initialized: FORWARD.`);
+        appendLog(`[${timestamp}] [NAV] Propulsion: FORWARD.`);
         setDriveDirection("FORWARD");
-        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "FORWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "FORWARD", speed: 255 }).catch(console.error);
       } else if (hasReverseKeyword) {
-        appendLog(`[${timestamp}] [NAV] Propulsion system initialized: BACKWARD.`);
+        appendLog(`[${timestamp}] [NAV] Propulsion: BACKWARD.`);
         setDriveDirection("BACKWARD");
-        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "BACKWARD", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "BACKWARD", speed: 255 }).catch(console.error);
       } else if (hasLeft) {
-        appendLog(`[${timestamp}] [NAV] Propulsion system initialized: LEFT.`);
+        appendLog(`[${timestamp}] [NAV] Propulsion: LEFT.`);
         setDriveDirection("LEFT");
-        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "LEFT", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "LEFT", speed: 255 }).catch(console.error);
       } else if (hasRight) {
-        appendLog(`[${timestamp}] [NAV] Propulsion system initialized: RIGHT.`);
+        appendLog(`[${timestamp}] [NAV] Propulsion: RIGHT.`);
         setDriveDirection("RIGHT");
-        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "RIGHT", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
-      } else if (['থামো', 'দাঁড়াও', 'দাঁড়াও', 'দাড়াও', 'থাম', 'দারান', 'দাঁড়ান', 'stop', 'halt', 'break', 'thamo', 'dara', 'thak'].some(k => lowerText.includes(k))) {
-        appendLog(`[${timestamp}] [NAV] Propulsion system halted: STOP.`);
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "RIGHT", speed: 255 }).catch(console.error);
+      } else if (hasStop) {
+        appendLog(`[${timestamp}] [NAV] Propulsion: STOP.`);
         setDriveDirection("STOP");
-        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
+        if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(console.error);
         setAiTaskState("idle");
       }
     }
 
-    // Status
     appendLog(`[${timestamp}] [SYS] Local parser sequence completed successfully.`);
   }, [commandUrl]);
 
@@ -2465,15 +2453,15 @@ export default function Dashboard() {
         // Drive keywords
         'সামনে', 'আগা', 'এগিয়ে', 'পিছনে', 'পেছনে', 'বামে', 'ডানে', 'থামো', 'দাঁড়াও', 'তোল', 'উঠাও', 'ধরো', 'নাও', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ',
         'জায়গা', 'সোজা', 'ঘুরে', 'চারপাশ', 'দেখ', 'খুঁজ', 'নাচ', 'লাল', 'নীল', 'সবুজ', 'হলুদ', 'কালো', 'সাদা', 'বস্তু', 'বল', 'জিনিস', 'গিয়ে', 'করো', 'দাও',
-        'রোভার', 'রোবার', 'gari', 'গাড়ি', 'car', 'rover',
+        'রোভার', 'রোবার', 'gari', 'গাড়ি', 'car', 'rover', 'গাড়ী', 'সামনের', 'এগোও', 'সামন', 'পিছা', 'পেছা', 'পিছন', 'পেছন',
         // Arm joint keywords
         'গ্রিপার', 'শোল্ডার', 'এলবো', 'রিস্ট', 'বেস', 'কাঁধ', 'কনুই', 'কবজি', 'খোলো', 'খুলো', 'খোলা', 'বন্ধ', 'ওপরে', 'উপরে', 'নিচে', 'নামাও', 'ঘুরাও', 'আটকাও', 'চিমটা', 'ধরন',
         // Additional Bengali arm words
-        'রিষ্ট', 'কব্জি', 'কাধ', 'কনু', 'এলব', 'গ্রিপ', 'ক্ল', 'ঘোরাও', 'সোল্ডার', 'বেইস', 'বেজ', 'বেশ', 'bondo',
+        'রিষ্ট', 'কব্জি', 'কাধ', 'কনু', 'এলব', 'গ্রিপ', 'ক্ল', 'ঘোরাও', 'সোল্ডার', 'বেইস', 'বেজ', 'বেশ', 'bondo', 'বেইজ', 'বেস্ট', 'ব্যাস', 'দেশ', 'ফেস', 'গেস', 'ব্রেস', 'পেস', 'ভেজ', 'বেছ', 'গোড়া', 'হাত', 'আঙুল', 'আঙ্গুল', 'চিমটি', 'কামড়', 'মুঠো',
         // Direction words
-        'উঠা', 'তুলো', 'ওঠা', 'ডাউন', 'আপ', 'ওঠাও', 'তোলো', 'যাও', 'নেও', 'ঘুরাও', 'উড়াও', 'উডাও', 'ওঠো', 'ও', 'bamdike', 'baame', 'daane',
+        'উঠা', 'তুলো', 'ওঠা', 'ডাউন', 'আপ', 'ওঠাও', 'তোলো', 'যাও', 'নেও', 'ঘুরাও', 'উড়াও', 'উডাও', 'ওঠো', 'ও', 'bamdike', 'baame', 'daane', 'উঁচুতে', 'নিচের', 'ছাড়', 'ছেড়ে', 'ধরে', 'বাঁদিকে', 'ডানদিকে',
         // Bengali mode home/reset
-        'হোম', 'রিসেট', 'রিসো', 'পিকআপ', 'পিক', 'ড্রপ', 'রিলিজ'
+        'হোম', 'রিসেট', 'রিসো', 'পিকআপ', 'পিক', 'ড্রপ', 'রিলিজ', 'স্বাভাবিক'
       ];
       const hasRealBengaliWord = realBengaliWords.some(k => lowerText.includes(k));
       if (!hasRealBengaliWord) {
@@ -2485,27 +2473,27 @@ export default function Dashboard() {
 
     // FAST-PATH: Local Keyword Matching (Instant response for voice/text driving)
     const isNavCommand = [
-      'সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight', 'ফরওয়ার্ড',
-      'পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao', 'ব্যাক', 'রিভার্স',
-      'বামে', 'বাম', 'left', 'বাঁয়ে', 'bame', 'bam', 'bamdike', 'baame',
-      'ডানে', 'ডান', 'right', 'ডানদিকে', 'daine', 'dan', 'dane', 'daane',
-      'থামো', 'দাঁড়াও', 'দাড়াও', 'থাম', 'দারান', 'দাঁড়ান', 'stop', 'halt', 'break', 'thamo', 'dara', 'thak',
-      'তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tulo', 'tolo', 'uthao', 'dhoro', 'pikap', 'উঠা', 'তুলে', 'ওঠাও', 'collect', 'lift', 'পিকআপ', 'পিক', 'উড়াও', 'উডাও', 'ওঠো', 'ও', 'udao', 'urao',
-      'ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo', 'ড্রপ', 'রিলিজ',
-      'হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal',
+      'সামনে', 'আগা', 'এগিয়ে', 'forw', 'ahead', 'samne', 'agao', 'agiye', 'straight', 'ফরওয়ার্ড', 'সামনের', 'এগোও', 'সামন',
+      'পিছনে', 'পেছনে', 'পিছা', 'পেছা', 'back', 'rev', 'piche', 'pechone', 'pichao', 'ব্যাক', 'রিভার্স', 'পিছন', 'পেছন',
+      'বামে', 'বাম', 'left', 'বাঁয়ে', 'bame', 'bam', 'bamdike', 'baame', 'বাঁদিকে', 'লেফট',
+      'ডানে', 'ডান', 'right', 'ডানদিকে', 'daine', 'dan', 'dane', 'daane', 'রাইট',
+      'থামো', 'দাঁড়াও', 'দাড়াও', 'থাম', 'দারান', 'দাঁড়ান', 'stop', 'halt', 'break', 'thamo', 'dara', 'thak', 'ব্রেক', 'স্টপ',
+      'তোল', 'তুল', 'উঠাও', 'ধর', 'নাও', 'pick', 'grab', 'tulo', 'tolo', 'uthao', 'dhoro', 'pikap', 'উঠা', 'তুলে', 'ওঠাও', 'collect', 'lift', 'পিকআপ', 'পিক', 'উড়াও', 'উডাও', 'ওঠো', 'ও', 'udao', 'urao', 'উঁচুতে',
+      'ছাড়', 'ছাড়ো', 'নামা', 'ফেল', 'রাখ', 'drop', 'releas', 'chharo', 'chere', 'rakho', 'namo', 'ড্রপ', 'রিলিজ', 'নিচের', 'ছেড়ে', 'ধরে',
+      'হোম', 'জায়গা', 'সোজা', 'রিসো', 'রিসেট', 'home', 'reset', 'ghore', 'normal', 'স্বাভাবিক',
       'চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo', 'স্ক্যান', 'সার্চ',
       'নাচ', 'ডান্স', 'dance', 'celebrate', 'nacho', 'anondo', 'ghuro',
       'sec', 'সেকেন্ড',
       // Color keywords
       'লাল', 'red', 'নীল', 'blue', 'সবুজ', 'green', 'হলুদ', 'yellow', 'কালো', 'black', 'সাদা', 'white', 'shada', 'sada', 'হোয়াইট', 'গ্রিন', 'ব্লু', 'ইয়েলো', 'ব্ল্যাক', 'রেড',
       // Object words
-      'বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu', 'অবজেক্ট',
+      'বস্তু', 'object', 'ball', 'বল', 'thing', 'জিনিস', 'jinish', 'bostu', 'অবজেক্ট', 'কিছু',
       // Individual arm joint keywords (with phonetic variations for speech recognition)
-      'gripper', 'grip', 'griper', 'greeper', 'গ্রিপার', 'গ্রিপ্পার', 'গ্রিপের', 'চিমটা', 'ধরন', 'claw', 'jaw', 'ক্ল', 'গ্রিপ',
+      'gripper', 'grip', 'griper', 'greeper', 'গ্রিপার', 'গ্রিপ্পার', 'গ্রিপের', 'চিমটা', 'ধরন', 'claw', 'jaw', 'ক্ল', 'গ্রিপ', 'হাত', 'haat', 'আঙ্গুল', 'angul', 'চিমটি', 'chimti', 'কামড়', 'kamor', 'মুঠো', 'mutho',
       'shoulder', 'শোল্ডার', 'কাঁধ', 'kandh', 'কাধ', 'সোল্ডার',
       'elbow', 'এলবো', 'কনুই', 'konui', 'কনু', 'এলব',
       'wrist', 'রিস্ট', 'কবজি', 'kobji', 'risk', 'rist', 'rest', 'রিষ্ট', 'কব্জি',
-      'base', 'বেস', 'ঘুরাও', 'ghurao', 'rotate', 'turn', 'ঘোরাও', 'spin', 'bass', 'bays', 'pace', 'বেইস', 'বেজ', 'বেশ', 'baze', 'bej', 'bez', 'vesh', 'bes', 'besh',
+      'base', 'বেস', 'ঘুরাও', 'ghurao', 'rotate', 'turn', 'ঘোরাও', 'spin', 'bass', 'bays', 'pace', 'বেইস', 'বেজ', 'বেশ', 'baze', 'bej', 'bez', 'vesh', 'bes', 'besh', 'বেইজ', 'বেস্ট', 'ব্যাস', 'দেশ', 'ফেস', 'গেস', 'ব্রেস', 'পেস', 'ভেজ', 'বেছ', 'গোড়া',
       'খোলো', 'খুলো', 'খোলা', 'khola', 'open', 'kholo', 'ওপেন', 'release',
       'বন্ধ', 'bondo', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'shut', 'clamp',
       'উপরে', 'ওপরে', 'up', 'upore', 'raise', 'উঠা', 'তুলো', 'আপ',
