@@ -154,13 +154,13 @@ const JOINT_CONFIG = {
 const JOINT_ORDER = ["base", "shoulder", "elbow", "wrist", "gripper"] as const;
 
 const ARM_PRESETS = [
-  { name: "Home",  joints: { base: 90, shoulder: 90,  elbow: 90,  wrist: 90, gripper: 90   } },
+  { name: "Home",  joints: { base: 85, shoulder: 63,  elbow: 74,  wrist: 42, gripper: 122 } },
   { name: "Pick",  joints: { base: 90, shoulder: 45,  elbow: 135, wrist: 90, gripper: 180 } },
-  { name: "Drop",  joints: { base: 45, shoulder: 60,  elbow: 90,  wrist: 45, gripper: 90   } },
+  { name: "Drop",  joints: { base: 45, shoulder: 60,  elbow: 90,  wrist: 45, gripper: 90  } },
   { name: "Reach", joints: { base: 90, shoulder: 150, elbow: 150, wrist: 90, gripper: 90  } },
 ];
 
-const DEFAULT_JOINTS: ArmAngles = { base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 };
+const DEFAULT_JOINTS: ArmAngles = { base: 85, shoulder: 63, elbow: 74, wrist: 42, gripper: 122 };
 
 // ─── Sub-Components (Memoized to prevent unnecessary re-renders) ───────────────
 
@@ -1932,9 +1932,8 @@ export default function Dashboard() {
   }, [joints]);
 
   const handleResetArm = useCallback(() => {
-    // Update UI slider states to Home (90 degrees, gripper open)
-    const homeState = { base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 };
-    animateJointsTo(homeState, "Home (reset)");
+    // Update UI slider states to Home
+    animateJointsTo(DEFAULT_JOINTS, "Home (reset)");
     if (commandUrl) {
       // Send HOME macro for ESP32 to run the mechanical homing sequence
       sendCommandViaHttp(commandUrl, { mode: "manual", action: "arm_macro", direction: "HOME", speed: 255 }).catch(e => { console.error(e); toast.error(String(e)); });
@@ -2201,6 +2200,9 @@ export default function Dashboard() {
     const hasPickKeyword = ['pick', 'grab', 'pikap', 'collect', 'পিকআপ', 'পিক'].some(k => lowerText.includes(k));
     const hasDropKeyword = ['drop', 'ড্রপ'].some(k => lowerText.includes(k));
     const hasScanKeyword = ['চারপাশ', 'দেখ', 'খুঁজ', 'scan', 'search', 'dekho', 'khojo', 'khujo', 'স্ক্যান', 'সার্চ'].some(k => lowerText.includes(k));
+    
+    // Explicit entity keywords
+    const explicitRover = ['রোভার', 'রোবার', 'rover', 'গাড়ি', 'gari', 'car', 'গাড়ী'].some(k => lowerText.includes(k));
 
     // Color keyword detection
     const colorMap: Record<string, string> = {
@@ -2244,7 +2246,7 @@ export default function Dashboard() {
       await new Promise(r => setTimeout(r, 4000));
       
       appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Mission Completed. Arm homed.`);
-      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 90 });
+      setJoints(DEFAULT_JOINTS);
       
       toast.success("Autonomous Drop Mission Completed!");
       return;
@@ -2276,7 +2278,7 @@ export default function Dashboard() {
       
       appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Phase 4: Mission Completed. Arm homed with payload.`);
       // Sync UI to final state (Home with closed gripper)
-      setJoints({ base: 90, shoulder: 90, elbow: 90, wrist: 90, gripper: 0 });
+      setJoints({ ...DEFAULT_JOINTS, gripper: 0 });
       
       toast.success("Autonomous Pick Mission Completed!");
       return;
@@ -2298,22 +2300,17 @@ export default function Dashboard() {
       
       await new Promise(r => setTimeout(r, 3000));
       
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Re-centering chassis...`);
-      setDriveDirection("LEFT");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "LEFT", speed: 200 }).catch(console.error);
-      
-      await new Promise(r => setTimeout(r, 1500));
-      
+      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Scan complete. Holding position.`);
       setDriveDirection("STOP");
-      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 255 }).catch(console.error);
-      appendLog(`[${new Date().toLocaleTimeString()}] [MISSION] Area Scan Complete.`);
-      toast.success("Area Scan Complete!");
+      if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "STOP", speed: 200 }).catch(console.error);
+      
+      toast.success("Scan Completed");
       return;
     }
 
     // C2. Dance / Celebrate Sequence
     if (hasDanceKeyword) {
-      appendLog(`[${timestamp}] [MISSION] Initiating Celebration Routine!`);
+      appendLog(`[${timestamp}] [MISSION] Initiating Celebration Routine...`);
       
       setDriveDirection("LEFT");
       if (commandUrl) sendCommandViaHttp(commandUrl, { mode: "manual", action: "drive", direction: "LEFT", speed: 255 }).catch(console.error);
@@ -2368,17 +2365,17 @@ export default function Dashboard() {
     }
 
     // E. Individual Arm Joint Commands — CHECK FIRST before drive to avoid conflicts
-    const hasGripper = ['গ্রিপার', 'gripper', 'grip', 'griper', 'greeper', 'গ্রিপ্পার', 'গ্রিপের', 'ধরন', 'চিমটা', 'claw', 'jaw', 'ক্ল', 'গ্রিপ'].some(k => lowerText.includes(k));
+    const hasGripper = ['গ্রিপার', 'gripper', 'grip', 'griper', 'greeper', 'গ্রিপ্পার', 'গ্রিপের', 'ধরন', 'চিমটা', 'claw', 'jaw', 'ক্ল', 'গ্রিপ', 'হাত', 'haat', 'আঙ্গুল', 'angul', 'ধরো', 'dhoro', 'ছাড়ো', 'charo', 'চিমটি', 'chimti', 'কামড়', 'kamor', 'মুঠো', 'mutho', 'গ্রিপারটা', 'gripperta'].some(k => lowerText.includes(k));
     const hasShoulder = ['শোল্ডার', 'shoulder', 'কাঁধ', 'kandh', 'কাধ', 'সোল্ডার'].some(k => lowerText.includes(k));
     const hasElbow = ['এলবো', 'elbow', 'কনুই', 'konui', 'কনু', 'এলব'].some(k => lowerText.includes(k));
     const hasWrist = ['রিস্ট', 'wrist', 'কবজি', 'kobji', 'risk', 'rist', 'rest', 'রিষ্ট', 'রিস্', 'কব্জি'].some(k => lowerText.includes(k));
-    // Removed generic words like 'turn', 'rotate', 'spin', 'ঘুরাও', 'ঘোরাও' so 'turn left' doesn't trigger base
-    const hasBaseJoint = ['বেস', 'base', 'bass', 'bays', 'pace', 'বেইস', 'বেজ', 'বেশ', 'baze', 'bej', 'bez', 'vesh', 'bes', 'besh', 'বেস্ট', 'best', 'ব্যাস', 'byas', 'ফেস', 'face', 'দেশ', 'desh', 'গেস', 'guess', 'ব্রেস', 'brace', 'পেস', 'pesh', 'pes', 'bace', 'vas', 'vash', 'ভেজ', 'vej'].some(k => lowerText.includes(k));
+    // Aggressive Bengali base detection to combat STT boundary issues
+    const hasBaseJoint = ['বেস', 'base', 'bass', 'bays', 'pace', 'বেইস', 'বেজ', 'বেশ', 'baze', 'bej', 'bez', 'vesh', 'bes', 'besh', 'বেস্ট', 'best', 'ব্যাস', 'byas', 'ফেস', 'face', 'দেশ', 'desh', 'গেস', 'guess', 'ব্রেস', 'brace', 'পেস', 'pesh', 'pes', 'bace', 'vas', 'vash', 'ভেজ', 'vej', 'বেছ', 'bech', 'bese', 'veze', 'besei', 'বেসেই'].some(k => lowerText.includes(k));
 
     const hasUp = ['উপরে', 'ওপরে', 'up', 'upore', 'upar', 'উঠাও', 'তোলো', 'ওঠাও', 'raise', 'lift', 'ওঠা', 'উঠা', 'তুলো', 'আপ', 'উড়াও', 'উডাও', 'ওঠো', 'udao', 'urao'].some(k => lowerText.includes(k)) || lowerText.split(/\s+/).includes('ও');
     const hasDown = ['নিচে', 'niche', 'down', 'নামাও', 'নেও', 'namao', 'lower', 'নামা', 'ডাউন'].some(k => lowerText.includes(k));
-    const hasOpen = ['খোলো', 'খুলো', 'open', 'kholo', 'khulo', 'ওপেন', 'release', 'খোলা', 'khola'].some(k => lowerText.includes(k));
-    const hasClose = ['বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'atkao', 'shut', 'clamp', 'bondo'].some(k => lowerText.includes(k));
+    const hasOpen = ['খোলো', 'খুলো', 'open', 'kholo', 'khulo', 'ওপেন', 'release', 'খোলা', 'khola', 'ছাড়ো', 'charo'].some(k => lowerText.includes(k));
+    const hasClose = ['বন্ধ', 'close', 'bondho', 'ক্লোজ', 'আটকাও', 'atkao', 'shut', 'clamp', 'bondo', 'ধরো', 'dhoro', 'কামড়', 'মুঠো'].some(k => lowerText.includes(k));
     const hasLeft = ['বামে', 'বাম', 'left', 'bame', 'বাঁয়ে', 'বাঁয়ে', 'bamdike', 'baame'].some(k => lowerText.includes(k));
     const hasRight = ['ডানে', 'ডান', 'right', 'daine', 'dan', 'ডানদিকে', 'dane', 'daane'].some(k => lowerText.includes(k));
 
@@ -2395,7 +2392,9 @@ export default function Dashboard() {
 
     const hasAnyJoint = hasGripper || hasShoulder || hasElbow || hasWrist || hasBaseJoint;
 
-    if (hasAnyJoint) {
+    // RULE: If user EXPLICITLY mentions "rover" or "gari", we bypass the Arm Joint execution block!
+    // This allows "rover bame ghurao" to correctly fall to the driving block, even if STT hallucinates a joint word.
+    if (hasAnyJoint && !explicitRover) {
       if (hasGripper) {
         if (hasOpen) {
           appendLog(`[${timestamp}] [ARM] Gripper: OPENING.`);
